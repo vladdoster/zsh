@@ -1,3 +1,118 @@
+2022-11-06  Bart Schaefer  <schaefer@zsh.org>
+
+	* 50874: Src/jobs.c: fix handling of tty signals for jobs in
+	the current shell when waiting for the right side of a pipeline.
+
+2022-11-02  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
+
+	* 50851: Doc/Zsh/options.yo, Src/exec.c, Src/options.c: restore
+	state (such as typtab) when returning from a function with
+	localoptions (but do not take care of EMACS/VI options).
+
+2022-10-31  Bart Schaefer  <schaefer@zsh.org>
+
+	* 50855: Doc/Zsh/builtins.yo, Doc/Zsh/params.yo: Clarify how
+	commands are hashed, and searched-for by "whence".
+
+2022-10-31  Peter Grayson  <pete@jpgrayson.net>
+
+	* 50844: Completion/Unix/Command/_stgit: Remove _stgit completion
+	script
+
+2022-10-25  Axel Beckert  <abe@deuxchevaux.org.org>
+
+	* 50840: Doc/Zsh/grammar.yo: Correct NO_MATCH to NOMATCH.
+
+2022-10-23  Bart Schaefer  <schaefer@zsh.org>
+
+	* users/28243: Doc/Zsh/builtins.yo: update "typeset +" doc
+
+2022-10-22  Bart Schaefer  <schaefer@zsh.org>
+
+	* 50714: Completion/Unix/Command/_git (_git-diff): also complete
+	in the 2nd argument position anything that could be in the 1st.
+
+2022-10-17  Peter Stephenson  <p.stephenson@samsung.com>
+
+	* 50786: Functions/Misc/add-zle-hook-widget: make match
+	etc. local when used in styles.
+
+2022-10-17  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
+
+	* Wesley Schwengle: 50736: Src/Zle/compmatch.c: silence
+	use-after-free waring (gcc-12.2)
+
+2022-09-29  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
+
+	* 50671: Util/ztst-syntax.vim: enable spell check in *.ztst
+
+2022-09-28  Eric Cook  <llua@gmx.com>
+	* Bart Schaefer: 50399: Completion/Base/Widget/_complete_debug
+	Properly local scope PS4 change
+
+	* 50695: Completion/Unix/Command/_mysql_utils add --protocol
+	option
+
+2022-09-27  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
+
+	* 50668: Src/utils.c, Test/D09brace.ztst: treat 8bit characters
+	in charcter range correctly when multibyte is unset
+
+2022-09-26  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
+
+	* 50662: Test/ztst.zsh: unset LC_* for all the tests
+
+	* 50658 + test: Src/Modules/pcre.c, Test/V07pcre.ztst: Enable to
+	switch between C/UTF-8 locales in PCRE
+
+2022-09-25  Peter Stephenson  <p.w.stephenson@ntlworld.com>
+
+	* 50648: Functions/Misc/zcalc: Julian Prein: Use ZCALC_HISTFILE
+	where defined for zcalc history.
+
+2022-09-21  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
+
+	* Nicholas Vinson: 50641: aczsh.m4, configure.ac: use 'int main()'
+	in test C-codes in configure
+
+2022-09-15  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
+
+	* 50629: Test/D07multibyte.ztst, Test/E01options.ztst,
+	Test/V07pcre.ztst, Test/X02zlevi.ztst, Test/X03zlebindkey.ztst,
+	Test/Y01completion.ztst, Test/ztst.zsh: do not use egrep in tests
+
+2022-08-28  Daniel Shahaf  <d.s@daniel.shahaf.name>
+
+	* unposted: Completion/Unix/Command/_imagemagick: Add *.svg
+	and *.webp files.
+
+2022-08-05  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
+
+	* Felipe Contreras: 50435+50436 (+50444):
+	Completion/Unix/Command/_make: do not actually build anything.
+	Also include some performance improvements.
+
+2022-07-24  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
+
+	* 50421: Completion/Zsh/Context/_redirect: add missing context
+	as the 1st argument to _dispatch
+
+	* 50418: Src/zsh_system.h, configure.ac: use setenv(3)/getenv(3)
+	on newer macOS
+
+2022-07-16  Bart Schaefer  <schaefer@Macadamia>
+
+	* users/27852: Completion/Unix/Command/_python: Make a local copy
+	of $_compskip to avoid propagating outward any changes by _normal
+
+2022-06-21  Bart Schaefer  <schaefer@zsh.org>
+
+	* 50379 (tweaked per 50380): Src/jobs.c: fix off-by-one
+	side-effect of workers/49906 that broke $(jobs -l)
+
+	* 50368: Src/Modules/db_gdbm.c: adjust bitflags so local copies of
+	variables cannot mess with database file contents
+
 2022-06-16  Peter Stephenson  <p.stephenson@samsung.com>
 
 	* 50372: Etc/FAQ.yo: remove redundant references from days of

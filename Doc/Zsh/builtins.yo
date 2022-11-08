@@ -1052,9 +1052,11 @@ The choice of hash table to work on is determined by the tt(-d) option;
 without the option the command hash table is used, and with the option the
 named directory hash table is used.
 
-A command var(name) starting with a tt(/) is never hashed, whether by
-explicit use of the tt(hash) command or otherwise.  Such a command
-is always found by direct look up in the file system.
+A command var(name) starting with a tt(/) or with a relative path
+starting with tt(./) or tt(../) is never executed by lookup in
+the command hash table, and these can only be added to the table by
+explicit use of the tt(hash) command.  Such a command is always
+found by direct look up in the file system.
 
 Given no arguments, and neither the tt(-r) or tt(-f) options,
 the selected hash table will be listed in full.
@@ -1063,9 +1065,11 @@ The tt(-r) option causes the selected hash table to be emptied.
 It will be subsequently rebuilt in the normal fashion.
 The tt(-f) option causes the selected hash table to be fully
 rebuilt immediately.  For the command hash table this hashes
-all the absolute directories in the tt(PATH),
-and for the named directory hash table this adds all users' home directories.
+all (and em(only)) the absolute directories in the tt(PATH),
+and for the named directory hash table this adds all users' home
+directories.
 These two options cannot be used with any arguments.
+Both options remove any explicitly-added elements.
 
 The tt(-m) option causes the arguments to be taken as patterns
 (which should be quoted) and the elements of the hash table
@@ -2047,8 +2051,9 @@ startitem()
 item(tt(PLUS()))(
 If `tt(PLUS())' appears by itself in a separate word as the last option,
 then the names of all parameters (functions with tt(-f)) are printed, but
-the values (function bodies) are not.  No var(name) arguments may appear,
-and it is an error for any other options to follow `tt(PLUS())'.  The
+the values (function bodies) are not.  If var(name) arguments appear,
+both those names and their values are printed in the form of assignments.
+It is an error for any other options to follow `tt(PLUS())', but the
 effect of `tt(PLUS())' is as if all attribute flags which precede it were
 given with a `tt(PLUS())' prefix.  For example, `tt(typeset -U PLUS())' is
 equivalent to `tt(typeset +U)' and displays the names of all arrays having
@@ -2081,7 +2086,8 @@ Except when assignments are made with var(name)tt(=)var(value), using
 tt(+m) forces the matching parameters and their attributes to be printed,
 even inside a function.  Note that tt(-m) is ignored if no patterns are
 given, so `tt(typeset -m)' displays attributes but `tt(typeset -a +m)'
-does not.
+does not.  Ordinary scalar string parameters have no attributes, so for
+those tt(+m) prints only the names.
 )
 item(tt(-p) [ var(n) ])(
 If the tt(-p) option is given, parameters and values are printed in the
@@ -2521,11 +2527,14 @@ item(tt(-a))(
 Do a search for all occurrences of var(name)
 throughout the command path.
 Normally only the first occurrence is printed.
+When combined with tt(-m), only names appearing in the command hash
+table are searched, but all occurrences of those names are printed.
 )
 item(tt(-m))(
 The arguments are taken as patterns (pattern characters should be
-quoted), and the information is displayed for each command matching one
-of these patterns.
+quoted), and the information is displayed for each entry in the command
+hash table matching one of these patterns.  The hash table is first
+refilled, in case of changes to tt(PATH).
 )
 item(tt(-s))(
 If a pathname contains symlinks, print the symlink-free pathname as well.
