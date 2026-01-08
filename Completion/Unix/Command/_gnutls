@@ -4,8 +4,7 @@ local -a args
 
 args=(
   '(- :)'{-h,--help}'[display help information]'
-  '(- :)--version=[display version information]:information:((v\:simple c\:copyright n\:full))'
-  '(- :)-v[display version information]'
+  '(- :)'{-v+,--version=-}'[display version information]:information:((v\:simple c\:copyright n\:full))'
   '(- :)'{-\!,--more-help}'[display help information through a pager]'
   '(-d --debug)'{-d,--debug}'[enable debugging]:debug level'
   \*{-V,--verbose}'[more verbose output]'
@@ -17,9 +16,15 @@ case "$service" in
       '(-p --port)'{-p,--port}'[specify port or service to connect to]:port:_ports'
     )
   ;|
+  gnutls-*|certtool)
+    args+=(
+      '--attime=[perform validation at the timestamp instead of the system time]:timestamp'
+    )
+  ;|
   gnutls-cli*)
     args+=(
       '(--app-proto --starttls-proto)'{--app-proto,--starttls-proto}"=[specify application protocol to use to obtain the server's certificate]:protocol:(https ftp smtp imap ldap xmpp lmtp pop3 nntp sieve postgres)"
+      '(-s --starttls)--starttls-name=[specify hostname presented to the application protocol for STARTTLS]:hostname'
      ':hostname:_hosts'
     )
   ;|
@@ -30,6 +35,7 @@ case "$service" in
       '(-u --udp)'{-u,--udp}'[use DTLS (datagram TLS) over UDP]'
       '--mtu=[set MTU for datagram TLS]:mtu'
       '--srtp-profiles=[offer SRTP profiles]:string'
+      '*--compress-cert=[compress certificate]:compression method'
       '(-b --heartbeat)'{-b,--heartbeat}'[activate heartbeat support]'
       '--x509fmtder[use DER format for certificates to read from]'
       '--priority=[specify TLS algorithms and protocols to enable]:(NORMAL PFS SECURE128 SECURE192 SUITEB128 SUITEB192 LEGACY PERFORMANCE NONE)'
@@ -95,6 +101,7 @@ case "$service" in
       '--inline-commands[inline commands of the form ^<cmd>^]'
       '--inline-commands-prefix=[change delimiter used for inline commands]:delimiter [^]'
       '--fips140-mode[report status of FIPS140-2 mode in gnutls library]'
+      '--list-config[report configuration of the library]'
       '--logfile=[redirect informational messages to a specific file]:file:_files'
       '--waitresumption[block waiting for the resumption data under TLS1.3]'
       '--ca-auto-retrieve[enable automatic retrieval of missing CA certificates]'
@@ -127,6 +134,7 @@ case "$service" in
       '--ignore-ocsp-response-errors[ignore any errors when setting the OCSP response]'
       '--recordsize=[specify maximum record size to advertise]:record size (0-16384)'
       '--httpdata=[specify data to use as HTTP response]:file:_files'
+      '--timeout=[specify he timeout period for server]:timeout'
     )
   ;;
 
@@ -195,9 +203,11 @@ case "$service" in
       '--seed=[when generating a private key use the given seed]:seed (hex-encoded)'
       '--pubkey-info[print information on a public key]'
       '--to-p12[generate a PKCS #12 structure]'
+      '--pbmac1[use PBMAC1 in a PKCS #12 structure]'
       '(-8 --pkcs8)'{-8,--pkcs8}'[use PKCS #8 format for private keys]'
       '--hash=[specify hash algorithm for signing]:algorithm:(MD5 SHA1 RMD160)'
       '--salt-size=[specify the RSA-PSS key default salt size]:size'
+      '--label=[specify the RSA-OAEP label, encoded in hexadecimal]:label'
       {--inder,--inraw}'[use DER format for input certificates and private keys]'
       {--outder,--outraw}'[use DER format for output certificates and private keys]'
       '--template=[specify template file to use for non-interactive operation]:file:_files'

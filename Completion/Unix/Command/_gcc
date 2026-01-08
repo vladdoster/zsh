@@ -1318,11 +1318,13 @@ fi
 
 local -a sanitizers
 sanitizers=(
-  address alignment bool bounds enum float-cast-overflow float-divide-by-zero
-  integer-divide-by-zero memory nonnull-attribute null nullability-arg
-  nullability-assign nullability-return object-size pointer-overflow return
-  unsigned-integer-overflow returns-nonnull-attribute shift signed-integer-overflow
-  unreachable vla-bound vptr
+  address alignment bool bounds bounds-strict enum builtin float-cast-overflow
+  float-divide-by-zero hwaddress integer-divide-by-zero kernel-address
+  kernel-hwaddress leak memory nonnull-attribute null nullability-arg nullability-assign
+  nullability-return object-size pointer-compare pointer-overflow pointer-subtract return
+  returns-nonnull-attribute shadow-call-stack shift shift-base shift-exponent
+  signed-integer-overflow thread undefined unsigned-integer-overflow unreachable
+  vla-bound vptr
 )
 
 local -a languages
@@ -1892,7 +1894,7 @@ args+=(
   '-freschedule-modulo-scheduled-loops[enable/disable the traditional scheduling in loops that already passed modulo scheduling]'
   '-frounding-math[disable optimizations that assume default FP rounding behavior]'
   '-frtti[generate run time type descriptor information]'
-  "-fsanitize=-[enable AddressSanitizer, a memory error detector]:style:($sanitizers)"
+  "*-fsanitize=-[enable AddressSanitizer, a memory error detector]:style:->sanitize"
   '-fsched2-use-superblocks[if scheduling post reload, do superblock scheduling]'
   '-fsched-critical-path-heuristic[enable the critical path heuristic in the scheduler]'
   '-fsched-dep-count-heuristic[enable the dependent count heuristic in the scheduler]'
@@ -2109,7 +2111,7 @@ args+=(
   '-s[remove all symbol table and relocation information from the executable]'
   '-static-libgcc[force static libgcc]'
   '-static[on systems that support dynamic linking, this prevents linking with the shared libraries]'
-  {'-std=-','--std='}'[assume that the input sources are for specified standard]:standard:(c90 c89 iso9899\:1990 iso9899\:199409 c99 iso9899\:1999 c11 iso9899\:2011 gnu90 gnu89 gnu99 gnu11 c++98 c++03 gnu++98 gnu++03 c++11 gnu++11 c++1y gnu++1y c++14 gnu++14 c++1z gnu++1z c++17 iso9899\:2017 gnu++17 c++2a gnu++2a)'
+  {'-std=-','--std='}'[assume that the input sources are for specified standard]:standard:(c90 c89 iso9899\:1990 iso9899\:199409 c99 iso9899\:1999 c1x c11 iso9899\:2011 c17 iso9899\:2017 c18 iso9899\:2018 c2x iso9899\:2024 c23 c2y gnu90 gnu89 gnu99 gnu1x gnu11 gnu17 gnu18 gnu2x gnu23 gnu2y c++98 c++03 gnu++98 gnu++03 c++11 gnu++11 c++1y gnu++1y c++14 gnu++14 c++1z gnu++1z c++17 iso9899\:2017 gnu++17 c++2a gnu++2a c++20 gnu++20 c++23 gnu++23)'
   '-symbolic[bind references to global symbols when building a shared object]'
   '--sysroot=-[use <directory> as the root directory for headers and libraries]:directory:_files -/'
   '--target-help[display target specific command line options]'
@@ -2281,6 +2283,9 @@ arch)
 archgeneric)
   arch+=(generic)
   _wanted cputypes expl "CPU type" compadd -a arch && ret=0
+  ;;
+sanitize)
+  _values -s , 'sanitizer' $sanitizers
   ;;
 esac
 

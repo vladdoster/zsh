@@ -6,20 +6,8 @@
     return 0
   fi
   setopt rematch_pcre
-# Find a UTF-8 locale.
-  setopt multibyte
-# Don't let LC_* override our choice of locale.
-  unset -m LC_\*
-  mb_ok=
-  langs=(en_{US,GB}.{UTF-,utf}8 en.UTF-8
-	 $(locale -a 2>/dev/null | egrep 'utf8|UTF-8'))
-  for LANG in $langs; do
-    if [[ é = ? ]]; then
-      mb_ok=1
-      break;
-    fi
-  done
-  if [[ -z $mb_ok ]]; then
+  LANG=$(ZTST_find_UTF8)
+  if [[ -z $LANG ]]; then
     ZTST_unimplemented="no UTF-8 locale or multibyte mode is not implemented"
   else
     print -u $ZTST_fd Testing PCRE multibyte with locale $LANG
@@ -120,6 +108,11 @@
 >0 xo→t →t
 >0 Xo→t →t
 
+  [[ foo =~ (pre)?f(o*)(opt(i)onal)?(y)* ]]
+  typeset -p match
+0:Empty string for optional captures that don't match
+>typeset -g -a match=( '' oo '' '' '' )
+
   string="The following zip codes: 78884 90210 99513"
   pcre_compile -m "\d{5}"
   pcre_match -b -- $string && print "$MATCH; ZPCRE_OP: $ZPCRE_OP"
@@ -129,11 +122,16 @@
 >78884; ZPCRE_OP: 25 30
 >90210; ZPCRE_OP: 31 36
 
-# Embedded NULs allowed in plaintext, but not in RE (although \0 as two-chars allowed)
+# Embedded NULs allowed in plaintext, in RE, pcre supports \0 as two-chars
   [[ $'a\0bc\0d' =~ '^(a\0.)(.+)$' ]]
   print "${#MATCH}; ${#match[1]}; ${#match[2]}"
 0:ensure ASCII NUL passes in and out of matched plaintext
 >6; 3; 3
+
+# PCRE2 supports NULs also in the RE
+  [[ $'a\0b\0c' =~ $'^(.\0)+' ]] && print "${#MATCH}; ${#match[1]}"
+0:ensure ASCII NUL works also in the regex
+>4; 2
 
 # Ensure the long-form infix operator works
   [[ foo -pcre-match ^f..$ ]]
@@ -174,3 +172,37 @@
     echo $match[2] )
 0:regression for segmentation fault, workers/38307
 >test
+
+  LANG_SAVE=$LANG
+  [[ é =~ '^.\z' ]]; echo $?
+  LANG=C
+  [[ é =~ '^..\z' ]]; echo $?
+  LANG=$LANG_SAVE
+  [[ é =~ '^.\z' ]]; echo $?
+0:switch between C/UTF-8 locales
+>0
+>0
+>0
+
+  [[ abc =~ 'a(d*)bc' ]] && print "$#MATCH; $#match; ${#match[1]}"
+0:empty capture
+>3; 1; 0
+
+  [[ category/name-12345 =~ '(?x)^
+    (?<category> [^/]* ) /
+    (?<package>
+      (?<name> \w+ ) -
+      (?<version> \d+ ))$' ]]
+  typeset -p1 .pcre.match
+0:named captures
+>typeset -g -A .pcre.match=(
+>  [category]=category
+>  [name]=name
+>  [package]=name-12345
+>  [version]=12345
+>)
+
+  pcre_compile 'cat(er(pillar)?)?'
+  pcre_match -d 'the caterpillar catchment' && print $match
+0:pcre_match -d
+>caterpillar cater cat

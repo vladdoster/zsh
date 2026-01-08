@@ -512,12 +512,13 @@ stringaszleline(char *instr, int incs, int *outll, int *outsz, int *outcs)
 	    *outcs = outptr - outstr;
 	*outll = outptr - outstr;
     } else {
+	*outstr = ZWC('\0');
 	*outll = 0;
 	if (outcs)
 	    *outcs = 0;
     }
 #else
-    memcpy(outstr, instr, ll);
+    strcpy(outstr, instr);
     *outll = ll;
     if (outcs)
 	*outcs = incs;
@@ -580,7 +581,7 @@ struct zle_region;
 struct zle_region  {
     struct zle_region *next;
     /* Entries of region_highlight, as needed */
-    int atr;
+    zattr atr;
     int start;
     int end;
     int flags;
@@ -799,7 +800,7 @@ spaceinline(int ct)
 		if (rhp->start_meta - sub >= zlemetacs) {
 		    rhp->start_meta += ct;
 		}
-		if (rhp->end_meta - sub >= zlemetacs) {
+		if (rhp->end_meta - sub >= zlemetacs && (!predisplaylen || zlemetacs)) {
 		    rhp->end_meta += ct;
 		}
 	    }
@@ -827,7 +828,7 @@ spaceinline(int ct)
 		if (rhp->start - sub >= zlecs) {
 		    rhp->start += ct;
 		}
-		if (rhp->end - sub >= zlecs) {
+		if (rhp->end - sub >= zlecs && (!predisplaylen || zlecs)) {
 		    rhp->end += ct;
 		}
 	    }
@@ -866,13 +867,13 @@ shiftchars(int to, int cnt)
 		    if (rhp->start_meta - sub > to + cnt)
 			rhp->start_meta -= cnt;
 		    else
-			rhp->start_meta = to;
+			rhp->start_meta = to + sub;
 		}
 		if (rhp->end_meta - sub > to) {
 		    if (rhp->end_meta - sub > to + cnt)
 			rhp->end_meta -= cnt;
 		    else
-			rhp->end_meta = to;
+			rhp->end_meta = to + sub;
 		}
 	    }
 	}
@@ -896,13 +897,13 @@ shiftchars(int to, int cnt)
 		    if (rhp->start - sub > to + cnt)
 			rhp->start -= cnt;
 		    else
-			rhp->start = to;
+			rhp->start = to + sub;
 		}
 		if (rhp->end - sub > to) {
 		    if (rhp->end - sub > to + cnt)
 			rhp->end -= cnt;
 		    else
-			rhp->end = to;
+			rhp->end = to + sub;
 		}
 	    }
 	}
@@ -948,7 +949,12 @@ cuttext(ZLE_STRING_T line, int ct, int flags)
 	return;
 
     UNMETACHECK();
-    if (zmod.flags & MOD_VIBUF) {
+    if (zmod.flags & MOD_OSSEL) {
+	int cutll;
+	char *mbcut = zlelineasstring(line, ct, 0, &cutll, NULL, 1);
+	unmetafy(mbcut, &cutll);
+	system_clipput(zmod.flags & MOD_CLIP ? 'c' : 'p', mbcut, cutll);
+    } else if (zmod.flags & MOD_VIBUF) {
 	struct cutbuffer *b = &vibuf[zmod.vibuf];
 
 	if (!(zmod.flags & MOD_VIAPP) || !b->buf) {
@@ -1220,7 +1226,7 @@ getzlequery(void)
 	REFRESH_ELEMENT re;
 	re.chr = c;
 	re.atr = 0;
-	zwcputc(&re, NULL);
+	zwcputc(&re);
     }
     return c == ZWC('y');
 }
@@ -1235,7 +1241,7 @@ bindztrdup(char *str)
     char *buf, *ptr, *ret;
 
     for(ptr = str; *ptr; ptr++) {
-	c = *ptr == Meta ? STOUC(*++ptr) ^ 32 : STOUC(*ptr);
+	c = *ptr == Meta ? (unsigned char) *++ptr ^ 32 : (unsigned char) *ptr;
 	if(c & 0x80) {
 	    len += 3;
 	    c &= 0x7f;
@@ -1249,7 +1255,7 @@ bindztrdup(char *str)
     }
     ptr = buf = zalloc(len);
     for(; *str; str++) {
-	c = *str == Meta ? STOUC(*++str) ^ 32 : STOUC(*str);
+	c = *str == Meta ? (unsigned char) *++str ^ 32 : (unsigned char) *str;
 	if(c & 0x80) {
 	    *ptr++ = '\\';
 	    *ptr++ = 'M';

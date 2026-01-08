@@ -3,12 +3,14 @@
 local context state line variant ign ret=1
 local -a args suf
 
-_pick_variant -r variant gnu=Free\ Soft $OSTYPE --version
+_pick_variant -r variant gnu='(Free Soft|uutils)' $OSTYPE --version
 case $variant in
   gnu)
     (( $#words > 2 )) && ign='!'
     args=(
+      '(-a --argv0)'{-a+,--argv0=}'[pass argument as the zeroth argument of command]:argument'
       '(-)'{-i,--ignore-environment}'[start with empty environment]'
+      '(* -0 --null)'{-0,--null}'[end each output line with NUL, not newline]'
       '(--ignore-environment -i --help --version)*'{-u+,--unset=}'[remove variable from the environment]:env var to remove:_parameters -g "*export*"'
       '(-C --chdir)'{-C+,--chdir=}'[change working directory]:directory:_directories'
       '(-S --split-string)'{-S+,--split-string=}'[perform word splitting]:string to split'
@@ -23,14 +25,23 @@ case $variant in
   ;;
   freebsd*)
     args=(
-      '-0[use NUL, not newline after each variable in output]'
       '-L[add variables from system login.conf(5)]: :->user-class'
       '-U[add variables from user and system login.conf(5)]: :->user-class'
     )
   ;|
-  freebsd*|darwin*|dragonfly*)
+  darwin*|freebsd*|netbsd*)
+    args+=(
+      '-C+[change working directory]:directory:_directories'
+      '-0[use NUL, not newline after each variable in output]'
+    )
+  ;|
+  freebsd*|darwin*|dragonfly*|netbsd*|openbsd*)
     args+=(
       '(-i)*-u+[remove variable from the environment]:env var to remove:_parameters -g "*export*"'
+    )
+  ;|
+  freebsd*|darwin*|dragonfly*)
+    args+=(
       '-P+[specify alternate executable search PATH]:path:_dir_list'
       '-S+[perform word splitting]:string to split'
       '*-v[verbose output]'
@@ -58,7 +69,7 @@ if [[ -n $state ]]; then
         shift words
         (( CURRENT-- ))
       done
-      _normal && ret=0
+      _normal -p env && ret=0
     ;;
     user-class)
       if compset -P 1 '*/'; then

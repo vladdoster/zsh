@@ -344,7 +344,7 @@ bin_zle(char *name, char **args, Options ops, UNUSED(int func))
 {
     static struct opn {
 	char o;
-	int (*func) _((char *, char **, Options, char));
+	int (*func) (char *, char **, Options, char);
 	int min, max;
     } const opns[] = {
 	{ 'l', bin_zle_list, 0, -1 },
@@ -366,10 +366,10 @@ bin_zle(char *name, char **args, Options ops, UNUSED(int func))
     int n;
 
     /* select operation and ensure no clashing arguments */
-    for(op = opns; op->o && !OPT_ISSET(ops,STOUC(op->o)); op++) ;
+    for(op = opns; op->o && !OPT_ISSET(ops, (unsigned char) op->o); op++) ;
     if(op->o)
 	for(opp = op; (++opp)->o; )
-	    if(OPT_ISSET(ops,STOUC(opp->o))) {
+	    if(OPT_ISSET(ops, (unsigned char) opp->o)) {
 		zwarnnam(name, "incompatible operation selection options");
 		return 1;
 	    }

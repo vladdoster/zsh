@@ -23,11 +23,33 @@ case $OSTYPE in
     else
       args=( ${args:#((#s)|*\))(\*|)--*} )	# remove long options
     fi
+    local delimiter=.
+    sysctlvars=( /proc/sys/**/*(.e*'REPLY=${REPLY#/proc/sys/}'*) )
+    if zstyle -t ":completion:${curcontext}:argument-rest" delimiter / || (( ${words[CURRENT][(Ie)/]} )); then
+      delimiter=/
+    else
+      sysctlvars=(${sysctlvars//\//.})
+    fi
+
     _arguments -S -A "-*" : $args \
       '(- :)'{-h,--help}'[display help text and exit]' \
       '(- :)'{-V,--version}'[display version info and exit]' \
-      '*:sysctl variable:_files -W /proc/sys'
+      "*:sysctl variable:_multi_parts -i -S = -q $delimiter sysctlvars"
   ;;
+  (free|open)bsd*)
+    args+=(
+      '-f+[specify file of name/value pairs to process first]:file:_files'
+    )
+  ;|
+  freebsd<14->.*)
+    args+=(
+      '-F[print the format of the variable]'
+      '-J[display only jail sysctl variables]'
+      '-j+[perform the actions inside the specified jail]: :_jails'
+      '(-N)-l[show the length of variables along with their values]'
+      '-V[display only VNET sysctl variables]'
+    )
+  ;|
   freebsd<11->.*)
     args+=(
       '-B[specify buffer size for reading]:buffer size'
@@ -36,7 +58,6 @@ case $OSTYPE in
   ;|
   freebsd<10->.*)
     args+=(
-      '-f+[specify file of name/value pairs to process first]:file:_files'
       '-T[display only variables that are settable via loader]'
       '-W[display only writable variables that are not statistical]'
     )
@@ -53,7 +74,7 @@ case $OSTYPE in
       '-d[print the description of the variable instead of its value]' \
       '(-N -n)-e[separate name and value with =]' \
       "-i[silently exit if variable doesn't exist]" \
-      '(-n)-N[show only variable names]' \
+      '(-n -l)-N[show only variable names]' \
       '(-N)-n[show only variable values]' \
       '(-x)-o[show opaques as well (values suppressed)]' \
       '-q[suppress some warnings]' \
@@ -65,8 +86,9 @@ case $OSTYPE in
     sysctlvars=( ${${${(f)"$(_call_program sysctl-variables
 				sysctl -a 2>/dev/null)"}%%=*}:# *} )
     _arguments -S -s -A "-*" \
-      '(-A -q *)-a[list all string and integer variables]' \
-      '(-a -q *)-A[list all known variables]' \
+      '(-A -f -q *)-a[list all string and integer variables]' \
+      '(-a -f -q *)-A[list all known variables]' \
+      '(-A -a *)-f[read name=value from specified file]: :_files' \
       '-n[show only values]' \
       '(-a -A)-q[suppress all output when setting a variable]' \
       '*:sysctl variable:_multi_parts -i -S = -q . sysctlvars'

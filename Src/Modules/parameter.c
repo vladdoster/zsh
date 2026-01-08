@@ -49,13 +49,15 @@ paramtypestr(Param pm)
 	if (pm->node.flags & PM_AUTOLOAD)
 	    return dupstring("undefined");
 
-	switch (PM_TYPE(f)) {
+	/* For simplicity we treat PM_NAMEREF as PM_TYPE(PM_SCALAR) */
+	switch (PM_TYPE(f)|(f & PM_NAMEREF)) {
 	case PM_SCALAR:  val = "scalar"; break;
 	case PM_ARRAY:   val = "array"; break;
 	case PM_INTEGER: val = "integer"; break;
 	case PM_EFLOAT:
 	case PM_FFLOAT:  val = "float"; break;
 	case PM_HASHED:  val = "association"; break;
+	case PM_NAMEREF: val = "nameref"; break;
 	}
 	DPUTS(!val, "BUG: type not handled in parameter");
 	val = dupstring(val);
@@ -103,10 +105,15 @@ getpmparameter(UNUSED(HashTable ht), const char *name)
     pm->node.nam = dupstring(name);
     pm->node.flags = PM_SCALAR | PM_READONLY;
     pm->gsu.s = &nullsetscalar_gsu;
-    if ((rpm = (Param) realparamtab->getnode(realparamtab, name)) &&
-	!(rpm->node.flags & PM_UNSET))
+    if ((rpm = (Param) realparamtab->getnode2(realparamtab, name)) &&
+	!(rpm->node.flags & PM_UNSET)) {
 	pm->u.str = paramtypestr(rpm);
-    else {
+	if ((rpm->node.flags & PM_NAMEREF) && rpm->u.str && *(rpm->u.str) &&
+	    (rpm = (Param) realparamtab->getnode(realparamtab, name)) &&
+	    !(rpm->node.flags & PM_UNSET)) {
+	    pm->u.str = zhtricat(pm->u.str, "-", paramtypestr(rpm));
+	}
+    } else {
 	pm->u.str = dupstring("");
 	pm->node.flags |= (PM_UNSET|PM_SPECIAL);
     }
@@ -182,7 +189,7 @@ setpmcommands(Param pm, HashTable ht)
 	    Cmdnam cn = zshcalloc(sizeof(*cn));
 	    struct value v;
 
-	    v.isarr = v.flags = v.start = 0;
+	    v.scanflags = v.valflags = v.start = 0;
 	    v.end = -1;
 	    v.arr = NULL;
 	    v.pm = (Param) hn;
@@ -302,7 +309,7 @@ setfunction(char *name, char *val, int dis)
     shfunc_set_sticky(shf);
 
     if (!strncmp(name, "TRAP", 4) &&
-	(sn = getsignum(name + 4)) != -1) {
+	(sn = getsigidx(name + 4)) != -1) {
 	if (settrap(sn, NULL, ZSIG_FUNC)) {
 	    freeeprog(shf->funcdef);
 	    zfree(shf, sizeof(*shf));
@@ -352,7 +359,7 @@ setfunctions(Param pm, HashTable ht, int dis)
 	for (hn = ht->nodes[i]; hn; hn = hn->next) {
 	    struct value v;
 
-	    v.isarr = v.flags = v.start = 0;
+	    v.scanflags = v.valflags = v.start = 0;
 	    v.end = -1;
 	    v.arr = NULL;
 	    v.pm = (Param) hn;
@@ -962,7 +969,7 @@ setpmoptions(Param pm, HashTable ht)
 	    struct value v;
 	    char *val;
 
-	    v.isarr = v.flags = v.start = 0;
+	    v.scanflags = v.valflags = v.start = 0;
 	    v.end = -1;
 	    v.arr = NULL;
 	    v.pm = (Param) hn;
@@ -1226,9 +1233,16 @@ histwgetfn(UNUSED(Param pm))
             pushnode(l, getdata(n));
 
     while (he) {
+	char *hstr = he->node.nam;
+	int len = strlen(hstr);
 	for (iw = he->nwords - 1; iw >= 0; iw--) {
-	    h = he->node.nam + he->words[iw * 2];
-	    e = he->node.nam + he->words[iw * 2 + 1];
+	    int wbegin = he->words[iw * 2];
+	    int wend = he->words[iw * 2 + 1];
+
+	    if (wbegin < 0 || wbegin >= len || wend < 0 || wend > len)
+		break;
+	    h = hstr + wbegin;
+	    e = hstr + wend;
 	    sav = *e;
 	    *e = '\0';
 	    addlinknode(l, dupstring(h));
@@ -1554,7 +1568,7 @@ setpmnameddirs(Param pm, HashTable ht)
 	    struct value v;
 	    char *val;
 
-	    v.isarr = v.flags = v.start = 0;
+	    v.scanflags = v.valflags = v.start = 0;
 	    v.end = -1;
 	    v.arr = NULL;
 	    v.pm = (Param) hn;
@@ -1785,7 +1799,7 @@ setaliases(HashTable alht, Param pm, HashTable ht, int flags)
 	    struct value v;
 	    char *val;
 
-	    v.isarr = v.flags = v.start = 0;
+	    v.scanflags = v.valflags = v.start = 0;
 	    v.end = -1;
 	    v.arr = NULL;
 	    v.pm = (Param) hn;

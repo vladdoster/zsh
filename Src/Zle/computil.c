@@ -911,7 +911,7 @@ struct cadef {
     Caarg rest;			/* the rest-argument */
     char **defs;		/* the original strings */
     int ndefs;			/* number of ... */
-    int lastt;			/* last time this was used */
+    time_t lastt;		/* last time this was used */
     Caopt *single;		/* array of single-letter options */
     char *match;		/* -M spec to use */
     int argsactive;		/* if normal arguments are still allowed */
@@ -1296,8 +1296,7 @@ parse_cadef(char *nam, char **args)
 		int l = strlen(p) - 1;
 
 		if (*p == '(' && p[l] == ')') {
-		    axor = p = dupstring(p + 1);
-		    p[l - 1] = '\0';
+		    axor = p = dupstring_wlen(p + 1, l - 1);
 		} else
 		    axor = NULL;
 		if (!*p) {
@@ -1317,8 +1316,7 @@ parse_cadef(char *nam, char **args)
 	    p = *++args;
 	    l = strlen(p) - 1;
 	    if (*p == '(' && p[l] == ')') {
-		axor = p = dupstring(p + 1);
-		p[l - 1] = '\0';
+		axor = p = dupstring_wlen(p + 1, l - 1);
 	    } else
 		axor = NULL;
 	    if (!*p) {
@@ -1339,7 +1337,7 @@ parse_cadef(char *nam, char **args)
 
 	    LinkList list = newlinklist();
 	    LinkNode node;
-	    char **xp, sav;
+	    char **xp;
 
 	    while (*p && *p != ')') {
 		for (p++; inblank(*p); p++);
@@ -1351,11 +1349,8 @@ parse_cadef(char *nam, char **args)
 		if (!*p)
 		    break;
 
-		sav = *p;
-		*p = '\0';
-		addlinknode(list, dupstring(q));
+		addlinknode(list, dupstring_wlen(q, p - q));
 		xnum++;
-		*p = sav;
 	    }
 	    /* Oops, end-of-string. */
 	    if (*p != ')') {
@@ -1846,7 +1841,7 @@ ca_inactive(Cadef d, char **xor, int cur, int opts)
 	for (; (x = (opts ? "-" : *xor)); xor++) {
 	    int excludeall = 0;
 	    char *grp = NULL;
-	    size_t grplen;
+	    size_t grplen = 0;
 	    char *next, *sep = x;
 
 	    while (*sep != '+' && *sep != '-' && *sep != ':' && *sep != '*' && !idigit(*sep)) {
@@ -2935,7 +2930,7 @@ struct cvdef {
     Cvval vals;			/* value definitions */
     char **defs;		/* original strings */
     int ndefs;			/* number of ... */
-    int lastt;			/* last time used */
+    time_t lastt;		/* last time used */
     int words;                  /* if to look at other words */
 };
 

@@ -296,13 +296,26 @@
 
 # tests of var+=(array)
 
+ a=
+ a+=(1 2 3)
+ print "${(q@)a}"
+0:add array to empty parameter
+>'' 1 2 3
+
  unset a
  a+=(1 2 3)
- print -l $a
+ print "${(q@)a}"
 0:add array to unset parameter
->1
->2
->3
+>1 2 3
+
+ () {
+  setopt localoptions typeset_to_unset
+  typeset a
+  a+=(1 2 3)
+  print "${(q@)a}"
+ }
+0:add array to declared unset parameter
+>1 2 3
 
  a=(a)
  a+=(b)
@@ -730,3 +743,10 @@
  print $a
 0:overwrite [2] character (string: "") with "xx"
 >xx
+
+ ( sleep 1 &
+   x[1]=$!
+   typeset -p x
+ )
+0:regression workers/53033: assigning $! to array element
+*>typeset -g -a x=\( <-> \)

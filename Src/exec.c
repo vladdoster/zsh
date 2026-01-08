@@ -56,14 +56,56 @@ struct funcsave {
 typedef struct funcsave *Funcsave;
 
 /*
- * used to suppress ERREXIT and trapping of SIGZERR, SIGEXIT.
+ * Used to suppress ERREXIT and trapping of SIGZERR, SIGEXIT in the
+ * evaluation of sub-commands of the command under evaluation. The
+ * variable must be updated before the evaluation of the sub-commands
+ * starts and restored to its previous state right after that
+ * evaluation ends. The variable is read and acted upon in execlist.
+ *
+ * A good usage example can be found in execwhile in loop.c, which
+ * evaluates while statements. The variable is updated to disable
+ * ERREXIT just before evaluating the while's condition and restored
+ * to its previous state right after the evaluation of the condition.
+ *
  * Bits from noerrexit_bits.
  */
 
 /**/
 int noerrexit;
 
-/* used to suppress ERREXIT or ERRRETURN for one occurrence: 0 or 1 */
+/*
+ * Used to suppress ERREXIT and ERRRETURN for the command under
+ * evaluation.  The variable must be enabled (set to 1) at the very
+ * end of the evaluation of the command. It must come after the
+ * evaluation of any sub-commands of the command under evaluation. The
+ * variable is read and acted upon in execlist, which also takes care
+ * of initialising and resetting it to 0.
+ *
+ * Unlike the variable noerrexit, whose state applies to the
+ * evaluation of whole sub-commands (and their direct and indirect
+ * sub-commands), the scope of the variable this_noerrexit is much
+ * more localized. ERREXIT and ERRRETURN are triggered at the end of
+ * the function execlist after the evaluation of some or all of the
+ * list's sub-commands. The role of the variable this_noerrexit is to
+ * give to the functions evaluating the list's sub-commands the
+ * possibility to tell the calling execlist not to trigger ERREXIT and
+ * ERRRETURN. In other words, the variable acts as an additional
+ * return value between the called evaluation functions and the
+ * calling execlist. For that reason the variable must always be set
+ * as late as possible and in particular after any sub-command
+ * evaluation. If the variable is set before the evaluation of a
+ * sub-command, if may affect the wrong execlist, if the sub-command
+ * evaluation involves another execlist call, and/or the variable may
+ * get modified by the sub-command evaluation and thus wouldn't return
+ * the desired value to the calling execlist.
+ *
+ * Good usage examples can be found in the exec functions in loop.c,
+ * which evaluate compound commands. The variable is enabled right
+ * before returning from the functions, after all the sub-commands of
+ * the compound commands have already been evaluated.
+ *
+ * 0 or 1
+ */
 
 /**/
 int this_noerrexit;
@@ -225,7 +267,7 @@ static char *blank_env[] = { NULL };
 
 /* Execution functions. */
 
-static int (*execfuncs[WC_COUNT-WC_CURSH]) _((Estate, int)) = {
+static int (*execfuncs[WC_COUNT-WC_CURSH]) (Estate, int) = {
     execcursh, exectime, NULL /* execfuncdef handled specially */,
     execfor, execselect,
     execwhile, execrepeat, execcase, execif, execcond,
@@ -306,10 +348,9 @@ setlimits(char *nam)
 
 /**/
 static pid_t
-zfork(struct timeval *tv)
+zfork(struct timespec *ts)
 {
     pid_t pid;
-    struct timezone dummy_tz;
 
     /*
      * Is anybody willing to explain this test?
@@ -318,8 +359,8 @@ zfork(struct timeval *tv)
 	zerr("job table full");
 	return -1;
     }
-    if (tv)
-	gettimeofday(tv, &dummy_tz);
+    if (ts)
+	zgettime_monotonic_if_available(ts);
     /*
      * Queueing signals is necessary on Linux because fork()
      * manipulates mutexes, leading to deadlock in memory
@@ -418,7 +459,7 @@ zfork(struct timeval *tv)
 int list_pipe = 0, simple_pline = 0;
 
 static pid_t list_pipe_pid;
-static struct timeval list_pipe_start;
+static struct timespec list_pipe_start;
 static int nowait, pline_level = 0;
 static int list_pipe_child = 0, list_pipe_job;
 static char list_pipe_text[JOBTEXTSIZE];
@@ -477,7 +518,7 @@ zexecve(char *pth, char **argv, char **newenvp)
     if (*pth == '/')
 	strcpy(buf + 2, pth);
     else
-	sprintf(buf + 2, "%s/%s", pwd, pth);
+	sprintf(buf + 2, "%s/%s", unmeta(pwd), pth);
     zputenv(buf);
 #ifndef FD_CLOEXEC
     closedumps();
@@ -509,7 +550,7 @@ zexecve(char *pth, char **argv, char **newenvp)
 			    break;
 		    if (t0 == ct)
 			zerr("%s: bad interpreter: %s: %e", pth,
-			     execvebuf + 2, eno);
+			     metafy(execvebuf + 2, -1, META_STATIC), eno);
 		    else {
 			while (inblank(execvebuf[t0]))
 			    execvebuf[t0--] = '\0';
@@ -532,8 +573,8 @@ zexecve(char *pth, char **argv, char **newenvp)
 				    execve(pprog, argv - 2, newenvp);
 				}
 			    }
-			    zerr("%s: bad interpreter: %s: %e", pth, ptr2,
-				 eno);
+			    zerr("%s: bad interpreter: %s: %e", pth,
+				 metafy(ptr2, -1, META_STATIC), eno);
 			} else if (*ptr) {
 			    *ptr = '\0';
 			    argv[-2] = ptr2;
@@ -561,7 +602,7 @@ zexecve(char *pth, char **argv, char **newenvp)
                         isbinary = 1;
                         hasletter = 0;
                         for (ptr = execvebuf; ptr < ptr2; ptr++) {
-                            if (islower(STOUC(*ptr)) || *ptr == '$' || *ptr == '`')
+			    if (islower((unsigned char) *ptr) || *ptr == '$' || *ptr == '`')
                                 hasletter = 1;
                             if (hasletter && *ptr == '\n') {
                                 isbinary = 0;
@@ -570,9 +611,22 @@ zexecve(char *pth, char **argv, char **newenvp)
                         }
                     }
 		    if (!isbinary) {
-			argv[-1] = "sh";
+		        char** args = argv;
+			if (argv[0][0] == '-' || argv[0][0] == '+') {
+			    /*
+			     * guard against +foo or -bar script paths being
+			     * taken as options. POSIX says the script path
+			     * must be passed as an *operand*. "--" would also
+			     * make sure the next argument is treated as an
+			     * operand with POSIX compliant sh implementations
+			     * but "-" is more portable (to the Bourne shell in
+			     * particular) and shorter.
+			     */
+			    *--args = "-";
+			}
+			*--args = "sh";
 			winch_unblock();
-			execve("/bin/sh", argv - 1, newenvp);
+			execve("/bin/sh", args, newenvp);
 		    }
 		}
 	    } else
@@ -826,6 +880,10 @@ execute(LinkList args, int flags, int defpath)
 	_realexit();
     else
 	zerr("command not found: %s", arg0);
+    /* This is bash behavior, but fails to restore interactive settings etc.
+    lastval = ((eno == EACCES || eno == ENOEXEC) ? 126 : 127);
+    return;
+    */
     _exit((eno == EACCES || eno == ENOEXEC) ? 126 : 127);
 }
 
@@ -1034,7 +1092,7 @@ entersubsh(int flags, struct entersubsh_ret *retp)
     int i, sig, monitor, job_control_ok;
 
     if (!(flags & ESUB_KEEPTRAP))
-	for (sig = 0; sig < SIGCOUNT; sig++)
+	for (sig = 0; sig <= SIGCOUNT; sig++)
 	    if (!(sigtrapped[sig] & ZSIG_FUNC) &&
 		!(isset(POSIXTRAPS) && (sigtrapped[sig] & ZSIG_IGNORED)))
 		unsettrap(sig);
@@ -1148,7 +1206,7 @@ entersubsh(int flags, struct entersubsh_ret *retp)
      * Start loop at 1 because 0 is SIGEXIT
      */
     if (intrap)
-	for (sig = 1; sig < SIGCOUNT; sig++)
+	for (sig = 1; sig <= SIGCOUNT; sig++)
 	    if (sigtrapped[sig] && sigtrapped[sig] != ZSIG_IGNORED)
 		signal_unblock(signal_mask(sig));
     if (!job_control_ok)
@@ -1328,7 +1386,7 @@ execlist(Estate state, int dont_change_job, int exiting)
 	*list_pipe_text = '\0';
     }
 
-    /* Loop over all sets of comands separated by newline, *
+    /* Loop over all sets of commands separated by newline, *
      * semi-colon or ampersand (`sublists').               */
     code = *state->pc++;
     if (wc_code(code) != WC_LIST) {
@@ -1373,7 +1431,7 @@ execlist(Estate state, int dont_change_job, int exiting)
 	    int oerrexit_opt = opts[ERREXIT];
 	    Param pm;
 	    opts[ERREXIT] = 0;
-	    noerrexit = NOERREXIT_EXIT | NOERREXIT_RETURN;
+	    noerrexit |= NOERREXIT_EXIT | NOERREXIT_RETURN;
 	    if (ltype & Z_SIMPLE) /* skip the line number */
 		pc2++;
 	    pm = assignsparam("ZSH_DEBUG_CMD",
@@ -1424,17 +1482,13 @@ execlist(Estate state, int dont_change_job, int exiting)
 	    goto sublist_done;
 	}
 	while (wc_code(code) == WC_SUBLIST) {
-	    int isend = (WC_SUBLIST_TYPE(code) == WC_SUBLIST_END);
+	    this_noerrexit = 0;
+	    int isandor = WC_SUBLIST_TYPE(code) != WC_SUBLIST_END;
+	    int isnot = WC_SUBLIST_FLAGS(code) & WC_SUBLIST_NOT;
 	    next = state->pc + WC_SUBLIST_SKIP(code);
-	    if (!oldnoerrexit)
-		noerrexit = isend ? 0 : NOERREXIT_EXIT | NOERREXIT_RETURN;
-	    if (WC_SUBLIST_FLAGS(code) & WC_SUBLIST_NOT) {
-		/* suppress errexit for "! this_command" */
-		if (isend)
-		    this_noerrexit = 1;
-		/* suppress errexit for ! <list-of-shell-commands> */
-		noerrexit = NOERREXIT_EXIT | NOERREXIT_RETURN;
-	    }
+	    /* suppress errexit for commands before && and || and after ! */
+	    if (isandor || isnot)
+		noerrexit |= NOERREXIT_EXIT | NOERREXIT_RETURN;
 	    switch (WC_SUBLIST_TYPE(code)) {
 	    case WC_SUBLIST_END:
 		/* End of sublist; just execute, ignoring status. */
@@ -1443,6 +1497,9 @@ execlist(Estate state, int dont_change_job, int exiting)
 		else
 		    execpline(state, code, ltype, (ltype & Z_END) && exiting);
 		state->pc = next;
+		/* suppress errexit for the command "! ..." */
+		if (isnot)
+		  this_noerrexit = 1;
 		goto sublist_done;
 		break;
 	    case WC_SUBLIST_AND:
@@ -1450,7 +1507,7 @@ execlist(Estate state, int dont_change_job, int exiting)
 		 * we find a sublist followed by ORNEXT.                   */
 		if ((ret = ((WC_SUBLIST_FLAGS(code) & WC_SUBLIST_SIMPLE) ?
 			    execsimple(state) :
-			    execpline(state, code, Z_SYNC, 0)))) {
+			    execpline(state, code, Z_SYNC, 0))) || breaks) {
 		    state->pc = next;
 		    code = *state->pc++;
 		    next = state->pc + WC_SUBLIST_SKIP(code);
@@ -1483,7 +1540,7 @@ execlist(Estate state, int dont_change_job, int exiting)
 		 * we find a sublist followed by ANDNEXT.              */
 		if (!(ret = ((WC_SUBLIST_FLAGS(code) & WC_SUBLIST_SIMPLE) ?
 			     execsimple(state) :
-			     execpline(state, code, Z_SYNC, 0)))) {
+			     execpline(state, code, Z_SYNC, 0))) || breaks) {
 		    state->pc = next;
 		    code = *state->pc++;
 		    next = state->pc + WC_SUBLIST_SKIP(code);
@@ -1514,18 +1571,12 @@ execlist(Estate state, int dont_change_job, int exiting)
 	    }
 	    state->pc = next;
 	    code = *state->pc++;
+	    noerrexit = oldnoerrexit;
 	}
 	state->pc--;
 sublist_done:
 
-	/*
-	 * See hairy code near the end of execif() for the
-	 * following.  "noerrexit " only applies until
-	 * we hit execcmd on the way down.  We're now
-	 * on the way back up, so don't restore it.
-	 */
-	if (!(oldnoerrexit & NOERREXIT_UNTIL_EXEC))
-	    noerrexit = oldnoerrexit;
+	noerrexit = oldnoerrexit;
 
 	if (sigtrapped[SIGDEBUG] && !isset(DEBUGBEFORECMD) && !donedebug) {
 	    /*
@@ -1534,7 +1585,7 @@ sublist_done:
 	     */
 	    int oerrexit_opt = opts[ERREXIT];
 	    opts[ERREXIT] = 0;
-	    noerrexit = NOERREXIT_EXIT | NOERREXIT_RETURN;
+	    noerrexit |= NOERREXIT_EXIT | NOERREXIT_RETURN;
 	    exiting = donetrap;
 	    ret = lastval;
 	    dotrap(SIGDEBUG);
@@ -1564,6 +1615,7 @@ sublist_done:
 			       (isset(ERRRETURN) && !errreturn)) &&
 		    !(noerrexit & NOERREXIT_EXIT);
 		if (errexit) {
+		    errflag = 0;
 		    if (sigtrapped[SIGEXIT])
 			dotrap(SIGEXIT);
 		    if (mypid != getpid())
@@ -1581,6 +1633,7 @@ sublist_done:
 	    break;
 	code = *state->pc++;
     }
+    this_noerrexit = 0;
     pline_level = old_pline_level;
     list_pipe = old_list_pipe;
     list_pipe_job = old_list_pipe_job;
@@ -1595,9 +1648,12 @@ sublist_done:
 	thisjob = cj;
 
     if (exiting && sigtrapped[SIGEXIT]) {
+	int eflag = errflag;
+	errflag = 0;	/* Clear the context for trap */
 	dotrap(SIGEXIT);
 	/* Make sure this doesn't get executed again. */
 	sigtrapped[SIGEXIT] = 0;
+	errflag = eflag;
     }
 
     unqueue_signals();
@@ -1624,7 +1680,7 @@ execpline(Estate state, wordcode slcode, int how, int last1)
     wordcode code = *state->pc++;
     static int lastwj, lpforked;
 
-    if (wc_code(code) != WC_PIPE)
+    if (wc_code(code) != WC_PIPE && !(how & Z_TIMED))
 	return lastval = (slflags & WC_SUBLIST_NOT) != 0;
     else if (slflags & WC_SUBLIST_NOT)
 	last1 = 0;
@@ -1806,7 +1862,7 @@ execpline(Estate state, wordcode slcode, int how, int last1)
 		      (jobtab[list_pipe_job].stat & STAT_STOPPED)))) {
 		    pid_t pid = 0;
 		    int synch[2];
-		    struct timeval bgtime;
+		    struct timespec bgtime;
 
 		    /*
 		     * A pipeline with the shell handling the right
@@ -1899,8 +1955,12 @@ execpline(Estate state, wordcode slcode, int how, int last1)
 			break;
 		    }
 		}
-		else if (subsh && jn->stat & STAT_STOPPED)
-		    thisjob = newjob;
+		else if (subsh && jn->stat & STAT_STOPPED) {
+		    if (thisjob == newjob)
+			makerunning(jn);
+		    else
+			thisjob = newjob;
+		}
 		else
 		    break;
 	    }
@@ -1922,7 +1982,7 @@ execpline(Estate state, wordcode slcode, int how, int last1)
 	}
 	else
 	    unqueue_signals();
-	if ((slflags & WC_SUBLIST_NOT) && !errflag)
+	if ((slflags & WC_SUBLIST_NOT) && !errflag && !retflag)
 	    lastval = !lastval;
     }
     if (!pline_level)
@@ -2223,7 +2283,7 @@ closemn(struct multio **mfds, int fd, int type)
 	char buf[TCBUFSIZE];
 	int len, i;
 	pid_t pid;
-	struct timeval bgtime;
+	struct timespec bgtime;
 
 	/*
 	 * We need to block SIGCHLD in case the process
@@ -2247,6 +2307,8 @@ closemn(struct multio **mfds, int fd, int type)
 	    return;
 	}
 	/* pid == 0 */
+	opts[INTERACTIVE] = 0;
+	dont_queue_signals();
 	child_unblock();
 	closeallelse(mn);
 	if (mn->rflag) {
@@ -2259,19 +2321,21 @@ closemn(struct multio **mfds, int fd, int type)
 			break;
 		}
 		for (i = 0; i < mn->ct; i++)
-		    write_loop(mn->fds[i], buf, len);
+		    if (write_loop(mn->fds[i], buf, len) < 0)
+			break;
 	    }
 	} else {
 	    /* cat process */
 	    for (i = 0; i < mn->ct; i++)
 		while ((len = read(mn->fds[i], buf, TCBUFSIZE)) != 0) {
 		    if (len < 0) {
-			if (errno == EINTR)
+			if (errno == EINTR && !isatty(mn->fds[i]))
 			    continue;
 			else
 			    break;
 		    }
-		    write_loop(mn->pipe, buf, len);
+		    if (write_loop(mn->pipe, buf, len) < 0)
+			break;
 		}
 	}
 	_exit(0);
@@ -2345,7 +2409,7 @@ addfd(int forked, int *save, struct multio **mfds, int fd1, int fd2, int rflag,
 	/* fd will be over 10, don't touch mfds */
 	fd1 = movefd(fd2);
 	if (fd1 == -1) {
-	    zerr("cannot moved fd %d: %e", fd2, errno);
+	    zerr("cannot move fd %d: %e", fd2, errno);
 	    return;
 	} else {
 	    fdtable[fd1] = FDT_EXTERNAL;
@@ -2544,6 +2608,17 @@ addvars(Estate state, Wordcode pc, int addflags)
 		opts[ALLEXPORT] = allexp;
 	    } else
 	    	pm = assignsparam(name, val, myflags);
+	    if (!pm) {
+		lastval = 1;
+		/*
+		 * This is cheating but some exec functions propagate
+		 * assignment status only from command substitution
+		 *
+		 * zerr("%s: assignment failed", name);
+		 */
+		if (!cmdoutval)
+		    cmdoutval = 1;
+	    }
 	    if (errflag) {
 		state->pc = opc;
 		return;
@@ -2568,7 +2643,16 @@ addvars(Estate state, Wordcode pc, int addflags)
 	    }
 	    fprintf(xtrerr, ") ");
 	}
-	assignaparam(name, arr, myflags);
+	if (!assignaparam(name, arr, myflags)) {
+	    lastval = 1;
+	    /*
+	     * See above RE "cheating"
+	     *
+	     * zerr("%s: array assignment failed", name);
+	     */
+	    if (!cmdoutval)
+		cmdoutval = 1;
+	}
 	if (errflag) {
 	    state->pc = opc;
 	    return;
@@ -2744,7 +2828,7 @@ execcmd_fork(Estate state, int how, int type, Wordcode varspc,
     pid_t pid;
     int synch[2], flags;
     struct entersubsh_ret esret;
-    struct timeval bgtime;
+    struct timespec bgtime;
 
     child_block();
     esret.gleader = -1;
@@ -2838,7 +2922,7 @@ execcmd_exec(Estate state, Execcmd_params eparams,
     struct multio *mfds[10];
     char *text;
     int save[10];
-    int fil, dfil, is_cursh, do_exec = 0, redir_err = 0, i;
+    int fil, dfil, is_cursh = 0, do_exec = 0, redir_err = 0, i;
     int nullexec = 0, magic_assign = 0, forked = 0, old_lastval;
     int is_shfunc = 0, is_builtin = 0, is_exec = 0, use_defpath = 0;
     /* Various flags to the command. */
@@ -2857,6 +2941,14 @@ execcmd_exec(Estate state, Execcmd_params eparams,
      * in order to check for prefix commands.
      */
     LinkList preargs;
+
+    /*
+     * for the "time" keyword
+     */
+    child_times_t shti, chti;
+    struct timespec then;
+    if (how & Z_TIMED)
+	shelltime(&shti, &chti, &then, 0);
 
     doneps4 = 0;
 
@@ -2941,7 +3033,7 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 	/*
 	 * preargs contains args that have been expanded by prefork.
 	 * Running execcmd_getargs() causes any argument available
-	 * in args to be exanded where necessary and transferred to
+	 * in args to be expanded where necessary and transferred to
 	 * preargs.  We call execcmd_getargs() every time we need to
 	 * analyse an argument not available in preargs, though there is
 	 * no guarantee a further argument will be available.
@@ -2990,6 +3082,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 		if (!(hn = resolvebuiltin(cmdarg, hn))) {
 		    if (forked)
 			_realexit();
+		    if (how & Z_TIMED)
+			shelltime(&shti, &chti, &then, 1);
 		    return;
 		}
 		if (type != WC_TYPESET)
@@ -3171,6 +3265,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 			    errflag |= ERRFLAG_ERROR;
 			    if (forked)
 				_realexit();
+			    if (how & Z_TIMED)
+				shelltime(&shti, &chti, &then, 1);
 			    return;
 			}
 		    }
@@ -3199,10 +3295,6 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 	}
     } else
 	preargs = NULL;
-
-    /* if we get this far, it is OK to pay attention to lastval again */
-    if (noerrexit & NOERREXIT_UNTIL_EXEC)
-	noerrexit = 0;
 
     /* Do prefork substitutions.
      *
@@ -3266,6 +3358,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 			errflag |= ERRFLAG_ERROR;
 			if (forked)
 			    _realexit();
+			if (how & Z_TIMED)
+			    shelltime(&shti, &chti, &then, 1);
 			return;
 		    } else if (!nullcmd || !*nullcmd || opts[SHNULLCMD]) {
 			if (!args)
@@ -3286,6 +3380,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 		    lastval = 0;
 		    if (forked)
 			_realexit();
+		    if (how & Z_TIMED)
+			shelltime(&shti, &chti, &then, 1);
 		    return;
 		} else {
 		    /*
@@ -3298,6 +3394,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 			lastval = 1;
 			if (forked)
 			    _realexit();
+			if (how & Z_TIMED)
+			    shelltime(&shti, &chti, &then, 1);
 			return;
 		    }
 		    cmdoutval = use_cmdoutval ? lastval : 0;
@@ -3316,6 +3414,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 		    }
 		    if (forked)
 			_realexit();
+		    if (how & Z_TIMED)
+			shelltime(&shti, &chti, &then, 1);
 		    return;
 		}
 	    } else if (isset(RESTRICTED) && (cflags & BINF_EXEC) && do_exec) {
@@ -3324,6 +3424,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 		lastval = 1;
 		if (forked)
 		    _realexit();
+		if (how & Z_TIMED)
+		    shelltime(&shti, &chti, &then, 1);
 		return;
 	    }
 
@@ -3360,6 +3462,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 			opts[AUTOCONTINUE] = oautocont;
 		    if (forked)
 			_realexit();
+		    if (how & Z_TIMED)
+			shelltime(&shti, &chti, &then, 1);
 		    return;
 		}
 		break;
@@ -3371,6 +3475,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 		if (!(hn = resolvebuiltin(cmdarg, hn))) {
 		    if (forked)
 			_realexit();
+		    if (how & Z_TIMED)
+			shelltime(&shti, &chti, &then, 1);
 		    return;
 		}
 		break;
@@ -3389,6 +3495,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 	    opts[AUTOCONTINUE] = oautocont;
 	if (forked)
 	    _realexit();
+	if (how & Z_TIMED)
+	    shelltime(&shti, &chti, &then, 1);
 	return;
     }
 
@@ -3468,6 +3576,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 		    opts[AUTOCONTINUE] = oautocont;
 		if (forked)
 		    _realexit();
+		if (how & Z_TIMED)
+		    shelltime(&shti, &chti, &then, 1);
 		return;
 	    }
 	}
@@ -3498,6 +3608,8 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 	    opts[AUTOCONTINUE] = oautocont;
 	if (forked)
 	    _realexit();
+	if (how & Z_TIMED)
+	    shelltime(&shti, &chti, &then, 1);
 	return;
     }
 
@@ -3712,7 +3824,7 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 		addfd(forked, save, mfds, fn->fd1, fil, 0, fn->varid);
 		/* If this is 'exec < file', read from stdin, *
 		 * not terminal, unless `file' is a terminal. */
-		if (nullexec == 1 && fn->fd1 == 0 &&
+		if (nullexec == 1 && fn->fd1 == 0 && !fn->varid &&
 		    isset(SHINSTDIN) && interact && !zleactive)
 		    init_io(NULL);
 		break;
@@ -4300,11 +4412,16 @@ execcmd_exec(Estate state, Execcmd_params eparams,
 	    errflag |= ERRFLAG_ERROR;
 	}
     }
+    if ((is_cursh || do_exec) && (how & Z_TIMED))
+	shelltime(&shti, &chti, &then, 1);
     if (newxtrerr) {
+	int eno = errno;
 	fil = fileno(newxtrerr);
 	fclose(newxtrerr);
 	xtrerr = oxtrerr;
+	/* Call zclose() to clean up internal tables, ignore EBADF */
 	zclose(fil);
+	errno = eno;
     }
 
     zsfree(STTYval);
@@ -4329,7 +4446,7 @@ save_params(Estate state, Wordcode pc, LinkList *restore_p, LinkList *remove_p)
     while (wc_code(ac = *pc) == WC_ASSIGN) {
 	s = ecrawstr(state->prog, pc + 1, NULL);
 	if ((pm = (Param) paramtab->getnode(paramtab, s))) {
-	    Param tpm;
+	    Param tpm = NULL;
 	    if (pm->env)
 		delenv(pm);
 	    if (!(pm->node.flags & PM_SPECIAL)) {
@@ -4346,7 +4463,6 @@ save_params(Estate state, Wordcode pc, LinkList *restore_p, LinkList *remove_p)
 		tpm = (Param) zshcalloc(sizeof *tpm);
 		tpm->node.nam = ztrdup(pm->node.nam);
 		copyparam(tpm, pm, 0);
-		pm = tpm;
 	    } else if (!(pm->node.flags & PM_READONLY) &&
 		       (unset(RESTRICTED) || !(pm->node.flags & PM_RESTRICTED))) {
 		/*
@@ -4357,10 +4473,10 @@ save_params(Estate state, Wordcode pc, LinkList *restore_p, LinkList *remove_p)
 		tpm = (Param) hcalloc(sizeof *tpm);
 		tpm->node.nam = pm->node.nam;
 		copyparam(tpm, pm, 1);
-		pm = tpm;
 	    }
 	    addlinknode(*remove_p, dupstring(s));
-	    addlinknode(*restore_p, pm);
+	    if (tpm)
+		addlinknode(*restore_p, tpm);
 	} else
 	    addlinknode(*remove_p, dupstring(s));
 
@@ -4636,6 +4752,9 @@ getoutput(char *cmd, int qt)
     if (!prog)
 	return NULL;
 
+    if (!isset(EXECOPT))
+	return newlinklist();
+
     if ((s = simple_redir_name(prog, REDIR_READ))) {
 	/* $(< word) */
 	int stream;
@@ -4709,7 +4828,7 @@ getoutput(char *cmd, int qt)
  */
 
 /**/
-mod_export LinkList
+static LinkList
 readoutput(int in, int qt, int *readerror)
 {
     LinkList ret;
@@ -4852,7 +4971,6 @@ getoutputfile(char *cmd, char **eptr)
 
     if ((fd = open(nam, O_WRONLY | O_CREAT | O_EXCL | O_NOCTTY, 0600)) < 0) {
 	zerr("process substitution failed: %e", errno);
-	free(nam);
 	if (!s)
 	    child_unblock();
 	return NULL;
@@ -4941,7 +5059,7 @@ getproc(char *cmd, char **eptr)
     int out = *cmd == Inang;
     char *pnam;
     pid_t pid;
-    struct timeval bgtime;
+    struct timespec bgtime;
 
 #ifndef PATH_DEV_FD
     int fd;
@@ -5030,7 +5148,7 @@ getpipe(char *cmd, int nullexec)
     Eprog prog;
     int pipes[2], out = *cmd == Inang;
     pid_t pid;
-    struct timeval bgtime;
+    struct timespec bgtime;
     char *ends;
 
     if (!(prog = parsecmd(cmd, &ends)))
@@ -5052,7 +5170,7 @@ getpipe(char *cmd, int nullexec)
 	procsubstpid = pid;
 	return pipes[!out];
     }
-    entersubsh(ESUB_ASYNC|ESUB_PGRP, NULL);
+    entersubsh(ESUB_ASYNC|ESUB_PGRP|ESUB_NOMONITOR, NULL);
     redup(pipes[out], out);
     closem(FDT_UNUSED, 0);	/* this closes pipes[!out] as well */
     cmdpush(CS_CMDSUBST);
@@ -5184,7 +5302,7 @@ exectime(Estate state, UNUSED(int do_exec))
 
     jb = thisjob;
     if (WC_TIMED_TYPE(state->pc[-1]) == WC_TIMED_EMPTY) {
-	shelltime();
+	shelltime(NULL,NULL,NULL,0);
 	return 0;
     }
     execpline(state, *state->pc++, Z_TIMED|Z_SYNC, 0);
@@ -5205,7 +5323,8 @@ static const char *const ANONYMOUS_FUNCTION_NAME = "(anon)";
  * (though I doubt anyone would ever do that).
  */
 /**/
-int is_anonymous_function_name(const char *name)
+mod_export int
+is_anonymous_function_name(const char *name)
 {
     return !strcmp(name, ANONYMOUS_FUNCTION_NAME);
 }
@@ -5366,7 +5485,7 @@ execfuncdef(Estate state, Eprog redir_prog)
 	} else {
 	    /* is this shell function a signal trap? */
 	    if (!strncmp(s, "TRAP", 4) &&
-		(signum = getsignum(s + 4)) != -1) {
+		(signum = getsigidx(s + 4)) != -1) {
 		if (settrap(signum, NULL, ZSIG_FUNC)) {
 		    freeeprog(shf->funcdef);
 		    dircache_set(&shf->filename, NULL);
@@ -5385,7 +5504,8 @@ execfuncdef(Estate state, Eprog redir_prog)
 	    if (funcstack && funcstack->tp == FS_FUNC &&
 		    !strcmp(s, funcstack->name)) {
 		Shfunc old = ((Shfunc)shfunctab->getnode(shfunctab, s));
-		shf->node.flags |= old->node.flags & (PM_TAGGED|PM_TAGGED_LOCAL);
+		if (old)
+		    shf->node.flags |= old->node.flags & (PM_TAGGED|PM_TAGGED_LOCAL);
 	    }
 	    shfunctab->addnode(shfunctab, ztrdup(s), shf);
 	}
@@ -5734,12 +5854,25 @@ doshfunc(Shfunc shfunc, LinkList doshargs, int noreturnval)
     char *name = shfunc->node.nam;
     int flags = shfunc->node.flags;
     char *fname = dupstring(name);
-    Eprog prog;
+    Eprog prog, marked_prog;
     static int oflags;
     static int funcdepth;
     Heap funcheap;
 
     queue_signals();	/* Lots of memory and global state changes coming */
+    /*
+     * In case this is a special function such as a trap, mark it
+     * as in use right now, so it doesn't get freed early.  The
+     * worst that can happen is this hangs around in memory a little
+     * longer than strictly needed.
+     *
+     * Classic example of this happening is running TRAPEXIT directly.
+     *
+     * Because the shell function's contents may change, we'll ensure
+     * we use a consistent structure for use / free.
+     */
+    marked_prog = shfunc->funcdef;
+    useeprog(marked_prog);
 
     NEWHEAPS(funcheap) {
 	/*
@@ -5771,6 +5904,22 @@ doshfunc(Shfunc shfunc, LinkList doshargs, int noreturnval)
 	    size_t bytes = sizeof(int)*numpipestats;
 	    funcsave->pipestats = (int *)zhalloc(bytes);
 	    memcpy(funcsave->pipestats, pipestats, bytes);
+	}
+
+	if (!strcmp(fname, "TRAPEXIT")) {
+	    /*
+	     * If we are executing TRAPEXIT directly, starttrapscope()
+	     * will pull the rug out from under us to ensure the
+	     * exit trap isn't run inside the function.  We just need
+	     * the information locally here, so copy it on the heap.
+	     *
+	     * The funcdef is separately handled by reference counting.
+	     */
+	    Shfunc shcopy = (Shfunc)zhalloc(sizeof(struct shfunc));
+	    memcpy(shcopy, shfunc, sizeof(struct shfunc));
+	    shcopy->node.nam = dupstring(shfunc->node.nam);
+	    shfunc = shcopy;
+	    name = shfunc->node.nam;
 	}
 
 	starttrapscope();
@@ -5897,6 +6046,8 @@ doshfunc(Shfunc shfunc, LinkList doshargs, int noreturnval)
 	funcsave->fstack.filename = getshfuncfile(shfunc);
 
 	prog = shfunc->funcdef;
+	DPUTS1(!prog->nref, "function definition %s has zero reference count",
+	       (fname && *fname) ? fname : "<anon>");
 	if (prog->flags & EF_RUN) {
 	    Shfunc shf;
 
@@ -5925,15 +6076,6 @@ doshfunc(Shfunc shfunc, LinkList doshargs, int noreturnval)
 	     * This function is forced to return.
 	     */
 	    retflag = 0;
-	    /*
-	     * The calling function isn't necessarily forced to return,
-	     * but it should be made sensitive to ERR_EXIT and
-	     * ERR_RETURN as the assumptions we made at the end of
-	     * constructs within this function no longer apply.  If
-	     * there are cases where this is not true, they need adding
-	     * to C03traps.ztst.
-	     */
-	    this_noerrexit = 0;
 	    breaks = funcsave->breaks;
 	}
 	freearray(pparams);
@@ -5961,11 +6103,23 @@ doshfunc(Shfunc shfunc, LinkList doshargs, int noreturnval)
 	    emulation = funcsave->emulation;
 	    sticky = funcsave->sticky;
 	} else if (isset(LOCALOPTIONS)) {
+	    /* we need to call inittyptab() if these options change */
+	    int init_typtab =
+#ifdef MULTIBYTE_SUPPORT
+			funcsave->opts[MULTIBYTE] != opts[MULTIBYTE] ||
+#endif
+			funcsave->opts[BANGHIST] != opts[BANGHIST] ||
+			funcsave->opts[SHINSTDIN] != opts[SHINSTDIN];
+	    /* take care of SUNKEYBOARDHACK but not of EMACS/VI */
+	    if (funcsave->opts[SUNKEYBOARDHACK] != opts[SUNKEYBOARDHACK])
+		keyboardhackchar = funcsave->opts[SUNKEYBOARDHACK] ? '`' : '\0';
 	    /* restore all shell options except PRIVILEGED and RESTRICTED */
 	    funcsave->opts[PRIVILEGED] = opts[PRIVILEGED];
 	    funcsave->opts[RESTRICTED] = opts[RESTRICTED];
 	    memcpy(opts, funcsave->opts, sizeof(opts));
 	    emulation = funcsave->emulation;
+	    if (init_typtab)
+		inittyptab();
 	} else {
 	    /* just restore a couple. */
 	    opts[XTRACE] = funcsave->opts[XTRACE];
@@ -5998,6 +6152,7 @@ doshfunc(Shfunc shfunc, LinkList doshargs, int noreturnval)
 	}
     } OLDHEAPS;
 
+    freeeprog(marked_prog);
     unqueue_signals();
 
     /*
@@ -6100,12 +6255,14 @@ getfpfunc(char *s, int *ksh, char **fdir, char **alt_path, int test_only)
 
     pp = alt_path ? alt_path : fpath;
     for (; *pp; pp++) {
-	if (strlen(*pp) + strlen(s) + 1 >= PATH_MAX)
+	if (**pp) {
+	    if (snprintf(buf, PATH_MAX, "%s/%s", *pp, s) >= PATH_MAX)
+		continue;
+	} else if (strlen(s) >= PATH_MAX) {
 	    continue;
-	if (**pp)
-	    sprintf(buf, "%s/%s", *pp, s);
-	else
+	} else {
 	    strcpy(buf, s);
+	}
 	if ((r = try_dump_file(*pp, s, buf, ksh, test_only))) {
 	    if (fdir)
 		*fdir = *pp;
@@ -6253,12 +6410,14 @@ cancd(char *s)
 	    return NULL;
 	if (!nocdpath)
 	    for (cp = cdpath; *cp; cp++) {
-		if (strlen(*cp) + strlen(s) + 1 >= PATH_MAX)
+		if (**cp) {
+		    if (snprintf(sbuf, PATH_MAX, "%s/%s", *cp, s) >= PATH_MAX)
+			continue;
+		} else if (strlen(s) >= PATH_MAX) {
 		    continue;
-		if (**cp)
-		    sprintf(sbuf, "%s/%s", *cp, s);
-		else
+		} else {
 		    strcpy(sbuf, s);
+		}
 		if (cancd2(sbuf)) {
 		    doprintdir = -1;
 		    return dupstring(sbuf);

@@ -356,7 +356,7 @@ finish_(UNUSED(Module m))
 
 /**/
 void
-register_module(char *n, Module_void_func setup,
+register_module(const char *n, Module_void_func setup,
 		Module_features_func features,
 		Module_enables_func enables,
 		Module_void_func boot,
@@ -846,7 +846,7 @@ Hookdef hooktab;
 
 /**/
 Hookdef
-gethookdef(char *n)
+gethookdef(const char *n)
 {
     Hookdef p;
 
@@ -974,7 +974,7 @@ deletehookdeffunc(Hookdef h, Hookfn f)
 
 /**/
 mod_export int
-deletehookfunc(char *n, Hookfn f)
+deletehookfunc(const char *n, Hookfn f)
 {
     Hookdef h = gethookdef(n);
 
@@ -1198,6 +1198,7 @@ add_autoparam(const char *module, const char *pnam, int flags)
 {
     Param pm;
     int ret;
+    int ne = noerrs;
 
     queue_signals();
     if ((ret = checkaddparam(pnam, (flags & FEAT_IGNORE)))) {
@@ -1212,14 +1213,18 @@ add_autoparam(const char *module, const char *pnam, int flags)
 	return ret == 2 ? 0 : -1;
     }
 
-    pm = setsparam(dupstring(pnam), ztrdup(module));
-
-    pm->node.flags |= PM_AUTOLOAD;
-    if (flags & FEAT_AUTOALL)
-	pm->node.flags |= PM_AUTOALL;
+    noerrs = 2;
+    if ((pm = setsparam(dupstring(pnam), ztrdup(module)))) {
+	pm->node.flags |= PM_AUTOLOAD;
+	if (flags & FEAT_AUTOALL)
+	    pm->node.flags |= PM_AUTOALL;
+	ret = 0;
+    } else
+	ret = -1;
+    noerrs = ne;
     unqueue_signals();
 
-    return 0;
+    return ret;
 }
 
 /* Remove a parameter added with add_autoparam() */
@@ -1332,7 +1337,7 @@ addmathfunc(MathFunc f)
 /* Delete a single math function */
 
 /**/
-mod_export int
+int
 deletemathfunc(MathFunc f)
 {
     MathFunc p, q;
@@ -1719,49 +1724,49 @@ module_loaded(const char *name)
 static int
 dyn_setup_module(Module m)
 {
-    return ((int (*)_((int,Module, void*))) m->u.handle)(0, m, NULL);
+    return ((int (*)(int,Module, void*)) m->u.handle)(0, m, NULL);
 }
 
 /**/
 static int
 dyn_features_module(Module m, char ***features)
 {
-    return ((int (*)_((int,Module, void*))) m->u.handle)(4, m, features);
+    return ((int (*)(int,Module, void*)) m->u.handle)(4, m, features);
 }
 
 /**/
 static int
 dyn_enables_module(Module m, int **enables)
 {
-    return ((int (*)_((int,Module, void*))) m->u.handle)(5, m, enables);
+    return ((int (*)(int,Module, void*)) m->u.handle)(5, m, enables);
 }
 
 /**/
 static int
 dyn_boot_module(Module m)
 {
-    return ((int (*)_((int,Module, void*))) m->u.handle)(1, m, NULL);
+    return ((int (*)(int,Module, void*)) m->u.handle)(1, m, NULL);
 }
 
 /**/
 static int
 dyn_cleanup_module(Module m)
 {
-    return ((int (*)_((int,Module, void*))) m->u.handle)(2, m, NULL);
+    return ((int (*)(int,Module, void*)) m->u.handle)(2, m, NULL);
 }
 
 /**/
 static int
 dyn_finish_module(Module m)
 {
-    return ((int (*)_((int,Module,void *))) m->u.handle)(3, m, NULL);
+    return ((int (*)(int,Module,void *)) m->u.handle)(3, m, NULL);
 }
 
 /**/
 #else
 
 static Module_generic_func
-module_func(Module m, char *name)
+module_func(Module m, const char *name)
 {
 #ifdef DYNAMIC_NAME_CLASH_OK
     return (Module_generic_func) dlsym(m->u.handle, name);
@@ -2438,7 +2443,7 @@ bin_zmodload(char *nam, char **args, Options ops, UNUSED(int func))
     int ops_au = OPT_ISSET(ops,'a') || OPT_ISSET(ops,'u');
     int ret = 1, autoopts;
     /* options only allowed with -F */
-    char *fonly = "lP", *fp;
+    const char *fonly = "lP", *fp;
 
     if (ops_bcpf && !ops_au) {
 	zwarnnam(nam, "-b, -c, -f, and -p must be combined with -a or -u");
@@ -2474,7 +2479,7 @@ bin_zmodload(char *nam, char **args, Options ops, UNUSED(int func))
 	return 1;
     }
     for (fp = fonly; *fp; fp++) {
-	if (OPT_ISSET(ops,STOUC(*fp)) && !OPT_ISSET(ops,'F')) {
+	if (OPT_ISSET(ops,(unsigned char) *fp) && !OPT_ISSET(ops,'F')) {
 	    zwarnnam(nam, "-%c is only allowed with -F", *fp);
 	    return 1;
 	}
@@ -3177,7 +3182,7 @@ bin_zmodload_features(const char *nam, char **args, Options ops)
 	} else if (OPT_ISSET(ops, 'L'))
 	    printf("zmodload -F %s ", m->node.nam);
 	for (fp = features, ep = enables; *fp; fp++, ep++) {
-	    char *onoff;
+	    const char *onoff;
 	    int term;
 	    if (*args) {
 		char **argp;
@@ -3447,7 +3452,8 @@ autofeatures(const char *cmdnam, const char *module, char **features,
 	defm = NULL;
 
     for (; *features; features++) {
-	char *fnam, *typnam, *feature;
+	char *fnam, *feature;
+	const char *typnam;
 	int add, fchar, flags = defflags;
 	autofeaturefn_t fn;
 

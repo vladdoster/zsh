@@ -4,11 +4,11 @@ local curcontext="$curcontext" variant ret=1
 local -A opt_args
 local -a state line args
 
-_pick_variant -r variant gnu=GNU $OSTYPE --version
+_pick_variant -r variant gnu='(GNU|uutils)' $OSTYPE --version
 
 args=(
   '-a+[generate suffixes of specified length]:length [2]' \
-  '(-l -p -n)-b+[put specified size in bytes in each output file]:size (bytes)' \
+  '(-l -p -n)-b+[put specified size in bytes in each output file]: :_numbers -u bytes size k m g' \
   '(-b -p -n)-l+[put specified number of lines/records in each output file]:lines' \
   '1:file:_files' \
   '2: :_guard "^-*" "prefix [x]"'
@@ -19,8 +19,8 @@ case $variant in
     args=( -C
       '(H -a --suffix-length)'{-a+,--suffix-length=}'[generate suffixes of specified length]:length [2]'
       '(H)--additional-suffix=[append an additional suffix to file names]:suffix'
-      '(H -b --bytes -C --line-bytes -l --lines -n --number)'{-b+,--bytes=}'[put specified size in bytes in each output file]:size (bytes)'
-      '(H -b --bytes -C --line-bytes -l --lines -n --number)'{-C+,--line-bytes=}'[put whole lines/records up to size limit in each output file]:size (bytes)'
+      '(H -b --bytes -C --line-bytes -l --lines -n --number)'{-b+,--bytes=}'[put specified size in each output file]: :_numbers -M "m\:{a-zA-Z}={A-Za-z}" -u bytes size {K,M,G,T,P,E,Z}{,B}' \
+      '(H -b --bytes -C --line-bytes -l --lines -n --number)'{-C+,--line-bytes=}'[put whole lines/records up to size limit in each output file]: :_numbers -M "m\:{a-zA-Z}={A-Za-z}" -u bytes size {K,M,G,T,P,E,Z}{,B}'
       '(H --numeric-suffixes -x --hex-suffixes)-d[use numeric suffixes starting at 0]'
       '(H -d -x --hex-suffixes)--numeric-suffixes=-[use numeric suffixes]::start value [0]'
       '(H -d --numeric-suffixes --hex-suffixes)-x[use hex suffixes starting at 0]'
@@ -39,15 +39,20 @@ case $variant in
       '(- 1 2)--version[display version information]'
     )
   ;;
-  (free|net)bsd*)
+  (free|net)bsd*|darwin*)
     args+=( '(-b -l -p)-n+[generate specified number of output files]:output files' )
   ;|
   darwin*|freebsd*)
     args+=(
+      '-d[use numeric suffixes]'
       '(-b -l -n)-p+[split the file whenever a line matches specified pattern]:pattern'
     )
   ;|
-  freebsd*) args+=( '-d[use numeric suffixes]' ) ;;
+  freebsd*)
+    args+=(
+      "-c[continue creating files and don't overwrite existing output files]"
+    )
+  ;;
 esac
 
 _arguments -s -S $args && ret=0

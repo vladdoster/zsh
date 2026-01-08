@@ -708,7 +708,7 @@ callcompfunc(char *s, char *fn)
 
 	    sav = *ss;
 	    *ss = '\0';
-	    tmp = (linwhat == IN_MATH ? dupstring(s) : multiquote(s, 0));
+	    tmp = (linwhat == IN_MATH ? dupstring_wlen(s, offs) : multiquote(s, 0));
 	    untokenize(tmp);
 	    compprefix = ztrdup(tmp);
 	    *ss = sav;
@@ -1230,14 +1230,14 @@ check_param(char *s, int set, int test)
 	else if (idigit(*e))
 	    while (idigit(*e))
 		e++;
-	else if ((ie = itype_end(e, IIDENT, 0)) != e) {
+	else if ((ie = itype_end(e, INAMESPC, 0)) != e) {
 	    do {
 		e = ie;
 		if (comppatmatch && *comppatmatch &&
 		    (*e == Star || *e == Quest))
 		    ie = e + 1;
 		else
-		    ie = itype_end(e, IIDENT, 0);
+		    ie = itype_end(e, INAMESPC, 0);
 	    } while (ie != e);
 	}
 
@@ -1820,7 +1820,7 @@ set_comp_sep(void)
      */
     sav = s[(i = swb - 1 - sqq + dq)];
     s[i] = '\0';
-    qp = (qttype == QT_SINGLE) ? dupstring(s) : rembslash(s);
+    qp = (qttype == QT_SINGLE) ? dupstring_wlen(s, i) : rembslash(s);
     s[i] = sav;
     if (swe < swb)
 	swe = swb;
@@ -2244,13 +2244,14 @@ addmatches(Cadata dat, char **argv)
 	if (dat->aflags & CAF_MATCH) {
 	    lipre = dupstring(compiprefix);
 	    lisuf = dupstring(compisuffix);
-	    lpre = dupstring(compprefix);
-	    lsuf = dupstring(compsuffix);
-	    llpl = strlen(lpre);
-	    llsl = strlen(lsuf);
+	    llpl = strlen(compprefix);
+	    llsl = strlen(compsuffix);
+	    lpre = dupstring_wlen(compprefix, llpl);
+	    lsuf = dupstring_wlen(compsuffix, llsl);
 
-	    if (llpl + (int)strlen(compqiprefix) + (int)strlen(lipre) != origlpre
-	     || llsl + (int)strlen(compqisuffix) + (int)strlen(lisuf) != origlsuf)
+	    /* This used to reference compqiprefix and compqisuffix, why? */
+	    if (llpl + (int)strlen(qipre) + (int)strlen(lipre) != origlpre
+	     || llsl + (int)strlen(qisuf) + (int)strlen(lisuf) != origlsuf)
 		lenchanged = 1;
 
 	    /* Test if there is an existing -P prefix. */
@@ -2299,12 +2300,8 @@ addmatches(Cadata dat, char **argv)
 		for (p = lpre + 2; *p && *p != ')'; p++);
 
 		if (*p == ')') {
-		    char sav = p[1];
-
-		    p[1] = '\0';
-		    globflag = dupstring(lpre);
 		    gfl = p - lpre + 1;
-		    p[1] = sav;
+		    globflag = dupstring_wlen(lpre, gfl);
 
 		    lpre = p + 1;
 		    llpl -= gfl;
@@ -2730,7 +2727,7 @@ add_match_data(int alt, char *str, char *orig, Cline line,
 	    sl = tsl;
 	}
 	if (qisl) {
-	    Cline qsl = bld_parts(dupstring(qisuf), qisl, qisl, NULL, NULL);
+	    Cline qsl = bld_parts(dupstring_wlen(qisuf, qisl), qisl, qisl, NULL, NULL);
 
 	    qsl->flags |= CLF_SUF;
 	    qsl->suffix = qsl->prefix;
@@ -2813,7 +2810,7 @@ add_match_data(int alt, char *str, char *orig, Cline line,
 	    line = p;
 	}
 	if (qipl) {
-	    Cline lp, p = bld_parts(dupstring(qipre), qipl, qipl, &lp, NULL);
+	    Cline lp, p = bld_parts(dupstring_wlen(qipre, qipl), qipl, qipl, &lp, NULL);
 
 	    lp->next = line;
 	    line = p;
@@ -2898,9 +2895,9 @@ add_match_data(int alt, char *str, char *orig, Cline line,
 		*t++ = '$';
 		*t++ = '\'';
 		*t++ = '\\';
-		*t++ = '0' + ((STOUC(curchar) >> 6) & 7);
-		*t++ = '0' + ((STOUC(curchar) >> 3) & 7);
-		*t++ = '0' + (STOUC(curchar) & 7);
+		*t++ = '0' + (((unsigned char) curchar >> 6) & 7);
+		*t++ = '0' + (((unsigned char) curchar >> 3) & 7);
+		*t++ = '0' + ((unsigned char) curchar & 7);
 		*t++ = '\'';
 	    } while (cnt == MB_INCOMPLETE && fs < fe);
 	    /* Scanning restarts from the spot after the char we skipped. */
@@ -3252,7 +3249,7 @@ makearray(LinkList l, int type, int flags, int *np, int *nlp, int *llp)
 	    /* Now sort the array (it contains matches). */
 	    matchorder = flags;
 	    qsort((void *) rp, n, sizeof(Cmatch),
-		  (int (*) _((const void *, const void *)))matchcmp);
+		  (int (*) (const void *, const void *))matchcmp);
 
 	    /* since the matches are sorted and the default is to remove
 	     * all duplicates, -1 (remove only consecutive dupes) is a no-op,
@@ -3294,7 +3291,7 @@ makearray(LinkList l, int type, int flags, int *np, int *nlp, int *llp)
 		sp = (Cmatch *) zhalloc((n + 1) * sizeof(Cmatch));
 		memcpy(sp, rp, (n + 1) * sizeof(Cmatch));
 		qsort((void *) sp, n, sizeof(Cmatch),
-		      (int (*) _((const void *, const void *)))matchcmp);
+		      (int (*) (const void *, const void *))matchcmp);
 		for (asp = sp + 1; *asp; asp++) {
 		    Cmatch *ap = asp - 1, *bp = asp;
 		    if (matcheq(*ap, *bp)) {

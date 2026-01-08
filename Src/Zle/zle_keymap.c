@@ -123,7 +123,7 @@ struct remprefstate {
 /**/
 Keymap curkeymap, localkeymap;
 /**/
-char *curkeymapname;
+mod_export char *curkeymapname;
 
 /* the hash table of keymap names */
 
@@ -404,7 +404,7 @@ static void
 scankeys(HashNode hn, UNUSED(int flags))
 {
     Key k = (Key) hn;
-    int f = k->nam[0] == Meta ? STOUC(k->nam[1])^32 : STOUC(k->nam[0]);
+    int f = k->nam[0] == Meta ? (unsigned char) k->nam[1]^32 : (unsigned char) k->nam[0];
     char m[3];
 
     while(skm_last < f) {
@@ -566,7 +566,7 @@ mod_export int
 bindkey(Keymap km, const char *seq, Thingy bind, char *str)
 {
     Key k;
-    int f = seq[0] == Meta ? STOUC(seq[1])^32 : STOUC(seq[0]);
+    int f = seq[0] == Meta ? (unsigned char) seq[1]^32 : (unsigned char) seq[0];
     char *buf, *ptr;
 
     if(km->flags & KM_IMMUTABLE)
@@ -661,7 +661,7 @@ keybind(Keymap km, char *seq, char **strp)
     Key k;
 
     if(ztrlen(seq) == 1) {
-	int f = seq[0] == Meta ? STOUC(seq[1])^32 : STOUC(seq[0]);
+	int f = seq[0] == Meta ? (unsigned char) seq[1]^32 : (unsigned char) seq[0];
 	Thingy bind = km->first[f];
 
 	if(bind)
@@ -687,7 +687,7 @@ keyisprefix(Keymap km, char *seq)
     if(!*seq)
 	return 1;
     if(ztrlen(seq) == 1) {
-	int f = seq[0] == Meta ? STOUC(seq[1])^32 : STOUC(seq[0]);
+	int f = seq[0] == Meta ? (unsigned char) seq[1]^32 : (unsigned char) seq[0];
 
 	if(km->first[f])
 	    return 0;
@@ -745,7 +745,7 @@ bin_bindkey(char *name, char **argv, Options ops, UNUSED(int func))
     static struct opn {
 	char o;
 	char selp;
-	int (*func) _((char *, char *, Keymap, char **, Options, char));
+	int (*func) (char *, char *, Keymap, char **, Options, char);
 	int min, max;
     } const opns[] = {
 	{ 'l', 0, bin_bindkey_lsmaps, 0,  -1 },
@@ -764,10 +764,10 @@ bin_bindkey(char *name, char **argv, Options ops, UNUSED(int func))
     int n;
 
     /* select operation and ensure no clashing arguments */
-    for(op = opns; op->o && !OPT_ISSET(ops,STOUC(op->o)); op++) ;
+    for(op = opns; op->o && !OPT_ISSET(ops,(unsigned char) op->o); op++) ;
     if(op->o)
 	for(opp = op; (++opp)->o; )
-	    if(OPT_ISSET(ops,STOUC(opp->o))) {
+	    if(OPT_ISSET(ops,(unsigned char) opp->o)) {
 		zwarnnam(name, "incompatible operation selection options");
 		return 1;
 	    }
@@ -1049,7 +1049,7 @@ bin_bindkey_bind(char *name, char *kmname, Keymap km, char **argv, Options ops, 
 	    char m[3];
 
 	    if(len < 2 || len > 2 + (bseq[1] == '-') ||
-	       (first = STOUC(bseq[0])) > (last = STOUC(bseq[len - 1]))) {
+	       (first = (unsigned char) bseq[0]) > (last = (unsigned char) bseq[len - 1])) {
 		zwarnnam(name, "malformed key range `%s'", useq);
 		ret = 1;
 	    } else {
@@ -1149,8 +1149,8 @@ scanbindlist(char *seq, Thingy bind, char *str, void *magic)
     if(bind == bs->bind && (bind || !strcmp(str, bs->str)) &&
        ztrlen(seq) == 1 && ztrlen(bs->lastseq) == 1) {
 	int l = bs->lastseq[1] ?
-	    STOUC(bs->lastseq[1]) ^ 32 : STOUC(bs->lastseq[0]);
-	int t = seq[1] ? STOUC(seq[1]) ^ 32 : STOUC(seq[0]);
+	    (unsigned char) bs->lastseq[1] ^ 32 : (unsigned char) bs->lastseq[0];
+	int t = seq[1] ? (unsigned char) seq[1] ^ 32 : (unsigned char) seq[0];
 
 	if(t == l + 1) {
 	    zsfree(bs->lastseq);
@@ -1315,7 +1315,7 @@ default_bindings(void)
     Keymap vismap = newkeymap(NULL, "visual");
     Keymap smap = newkeymap(NULL, ".safe");
     Keymap vimaps[2], vilmaps[2], kptr;
-    char buf[3], *ed;
+    char buf[3];
     int i;
 
     /* vi insert mode and emacs mode:  *
@@ -1445,17 +1445,14 @@ default_bindings(void)
 	}
 
     /* Put the keymaps in the right namespace.  The "main" keymap  *
-     * will be linked to the "emacs" keymap, except that if VISUAL *
-     * or EDITOR contain the string "vi" then it will be linked to *
-     * the "viins" keymap.                                         */
+     * will be linked to the "emacs" keymap.                       */
     linkkeymap(vmap, "viins", 0);
     linkkeymap(emap, "emacs", 0);
     linkkeymap(amap, "vicmd", 0);
     linkkeymap(oppmap, "viopp", 0);
     linkkeymap(vismap, "visual", 0);
     linkkeymap(smap, ".safe", 1);
-    if (((ed = zgetenv("VISUAL")) && strstr(ed, "vi")) ||
-	((ed = zgetenv("EDITOR")) && strstr(ed, "vi")))
+    if (isset(VIMODE))
 	linkkeymap(vmap, "main", 0);
     else
 	linkkeymap(emap, "main", 0);
@@ -1503,7 +1500,7 @@ default_bindings(void)
  */
 
 /**/
-mod_export ZLE_INT_T
+static ZLE_INT_T
 getrestchar_keybuf(void)
 {
     char c;
@@ -1526,10 +1523,10 @@ getrestchar_keybuf(void)
      */
     while (1) {
 	if (bufind < buflen) {
-	    c = STOUC(keybuf[bufind++]);
+	    c = (unsigned char) keybuf[bufind++];
 	    if (c == Meta) {
 		DPUTS(bufind == buflen, "Meta at end of keybuf");
-		c = STOUC(keybuf[bufind++]) ^ 32;
+		c = (unsigned char) keybuf[bufind++] ^ 32;
 	    }
 	} else {
 	    /*
@@ -1586,7 +1583,7 @@ getkeymapcmd(Keymap km, Thingy *funcp, char **strp)
     Thingy func = t_undefinedkey;
     char *str = NULL;
     int lastlen = 0, lastc = lastchar;
-    int timeout = 0;
+    int timeout = 0, csi = 0, oscdcs = 0;
 
     keybuflen = 0;
     keybuf[0] = 0;
@@ -1626,8 +1623,13 @@ getkeymapcmd(Keymap km, Thingy *funcp, char **strp)
 
 	    /* can be patient with vi commands that need a motion operator: *
 	     * they wait till a key is pressed for the movement anyway      */
-	    timeout = !(!virangeflag && !region_active && f && f->widget &&
-		    f->widget->flags & ZLE_VIOPER);
+	    if (!(timeout = !(!virangeflag && !region_active && f && f->widget &&
+		    f->widget->flags & ZLE_VIOPER))) {
+		int nochg = vichgflag;
+		vichgflag = 2;
+		cursor_form();
+		vichgflag = nochg;
+	    }
 #ifdef MULTIBYTE_SUPPORT
 	    if ((f == Th(z_selfinsert) || f == Th(z_selfinsertunmeta)) &&
 		!lastchar_wide_valid && !ispfx) {
@@ -1636,7 +1638,55 @@ getkeymapcmd(Keymap km, Thingy *funcp, char **strp)
 	    }
 #endif
 	}
-	if (!ispfx)
+
+	/* CSI key sequences have a well defined structure so if we currently
+	 * have an incomplete one, loop so the rest of it will be included in
+	 * the key sequence if that arrives within the timeout. */
+	if (!csi && keybuflen >= 3 && keybuf[keybuflen - 3] == '\033' &&
+		keybuf[keybuflen - 2] == '[')
+	    csi = keybuflen - 1;
+	if (csi) {
+	    if (keybuf[keybuflen - 2] == Meta || keybuf[keybuflen - 1] < 0x20
+		   || keybuf[keybuflen - 1] > 0x3f) {
+	    /* If we reach the end of a valid CSI sequence and the matched key
+	     * binding is for part of the CSI introduction, select instead the
+	     * undefined-key widget and consume the full sequence from the
+	     * input buffer. */
+		if (keybuf[keybuflen - 1] >= 0x40 &&
+			keybuf[keybuflen - 1] <= 0x7e && lastlen > csi - 2 &&
+			lastlen <= csi) {
+		    if (keybuf[csi] == '?' && (keybuf[keybuflen - 1] == 'c' ||
+			keybuf[keybuflen - 1] == 'u'))
+		    { /* is a terminal query response - discard */
+			keybuflen = csi - 2;
+			timeout = csi = 0;
+			continue;
+		    }
+		    func = t_undefinedkey;
+		    lastlen = keybuflen;
+		}
+		csi = 0;
+	    }
+	}
+	/* An OSC or DCS sequence is likely a late arriving terminal query
+	 * response. Keep looping; if we reach an ST, discard the sequence
+	 * - unless we first match a keybinding or a keytimeout elapses. */
+	if (oscdcs) {
+	    if (keybuf[keybuflen - 1] == '\007' || /* BEL sometimes used */
+		(keybuf[keybuflen - 2] == '\033' &&
+		 keybuf[keybuflen - 1] == '\\') ||
+		(keybuf[keybuflen - 2] == Meta && /* ST can be 0x9b */
+		 (unsigned char) keybuf[keybuflen - 1] == (0x9b ^ 32)))
+	    {
+		keybuflen = oscdcs - 2; /* discard */
+		timeout = oscdcs = 0;
+		continue;
+	    }
+	} else if (keybuflen >= 2 && keybuf[keybuflen - 2] == '\033' &&
+		(keybuf[keybuflen - 1] == ']' || keybuf[keybuflen - 1] == 'P'))
+	    oscdcs = keybuflen;
+
+	if (!ispfx && !csi && !oscdcs)
 	    break;
     }
     if(!lastlen && keybuflen)

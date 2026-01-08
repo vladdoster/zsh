@@ -55,7 +55,7 @@
    when we started without being process group leader */
 
 /**/
-mod_export pid_t origpgrp;
+pid_t origpgrp;
 
 /* the process group of the shell */
 
@@ -98,12 +98,10 @@ mod_export int jobtabsize;
 mod_export int maxjob;
 
 /* If we have entered a subshell, the original shell's job table. */
-/**/
-mod_export struct job *oldjobtab;
+static struct job *oldjobtab;
 
 /* The size of that. */
-/**/
-mod_export int oldmaxjob;
+static int oldmaxjob;
 
 /* shell timings */
  
@@ -136,12 +134,27 @@ int numpipestats, pipestats[MAX_PIPESTATS];
 
 /**/
 static struct timeval *
-dtime(struct timeval *dt, struct timeval *t1, struct timeval *t2)
+dtime_tv(struct timeval *dt, struct timeval *t1, struct timeval *t2)
 {
     dt->tv_sec = t2->tv_sec - t1->tv_sec;
     dt->tv_usec = t2->tv_usec - t1->tv_usec;
     if (dt->tv_usec < 0) {
 	dt->tv_usec += 1000000.0;
+	dt->tv_sec -= 1.0;
+    }
+    return dt;
+}
+
+/* As above, but with timespecs */
+
+/**/
+static struct timespec *
+dtime_ts(struct timespec *dt, struct timespec *t1, struct timespec *t2)
+{
+    dt->tv_sec = t2->tv_sec - t1->tv_sec;
+    dt->tv_nsec = t2->tv_nsec - t1->tv_nsec;
+    if (dt->tv_nsec < 0) {
+	dt->tv_nsec += 1000000000.0;
 	dt->tv_sec -= 1.0;
     }
     return dt;
@@ -349,7 +362,6 @@ get_usage(void)
 void
 update_process(Process pn, int status)
 {
-    struct timezone dummy_tz;
 #ifdef HAVE_GETRUSAGE
     struct timeval childs = child_usage.ru_stime;
     struct timeval childu = child_usage.ru_utime;
@@ -360,12 +372,12 @@ update_process(Process pn, int status)
 
     /* get time-accounting info          */
     get_usage();
-    gettimeofday(&pn->endtime, &dummy_tz);  /* record time process exited        */
+    zgettime_monotonic_if_available(&pn->endtime); /* record time process exited */
 
     pn->status = status;                    /* save the status returned by WAIT  */
 #ifdef HAVE_GETRUSAGE
-    dtime(&pn->ti.ru_stime, &childs, &child_usage.ru_stime);
-    dtime(&pn->ti.ru_utime, &childu, &child_usage.ru_utime);
+    dtime_tv(&pn->ti.ru_stime, &childs, &child_usage.ru_stime);
+    dtime_tv(&pn->ti.ru_utime, &childu, &child_usage.ru_utime);
 #else
     pn->ti.st  = shtms.tms_cstime - childs; /* compute process system space time */
     pn->ti.ut  = shtms.tms_cutime - childu; /* compute process user space time   */
@@ -427,11 +439,17 @@ storepipestats(Job jn, int inforeground, int fixlastval)
     }
 
     if (fixlastval) {
-      if (jn->stat & STAT_CURSH) {
-	if (!lastval && isset(PIPEFAIL))
-	  lastval = pipefail;
-      } else if (isset(PIPEFAIL))
-	lastval = pipefail;
+	if (jn->stat & STAT_CURSH) {
+	    if (!lastval && isset(PIPEFAIL)) {
+		if (inforeground)
+		    this_noerrexit = 0;
+		lastval = pipefail;
+	    }
+	} else if (isset(PIPEFAIL)) {
+	    if (inforeground)
+		this_noerrexit = 0;
+	    lastval = pipefail;
+	}
     }
 }
 
@@ -544,16 +562,14 @@ update_job(Job jn)
 
     if (isset(MONITOR)) {
 	pid_t pgrp = gettygrp();           /* get process group of tty      */
+	int deadpgrp = (mypgrp != pgrp && inforeground && pgrp > 1 &&
+			kill(-pgrp, 0) == -1 && errno == ESRCH);
 
 	/* is this job in the foreground of an interactive shell? */
 	if (mypgrp != pgrp && inforeground &&
-	    (jn->gleader == pgrp ||
-	     (pgrp > 1 &&
-	      (kill(-pgrp, 0) == -1 && errno == ESRCH)))) {
+	    ((jn->gleader == pgrp && signalled) || deadpgrp)) {
 	    if (list_pipe) {
-		if (somestopped || (pgrp > 1 &&
-				    kill(-pgrp, 0) == -1 &&
-				    errno == ESRCH)) {
+		if (somestopped || deadpgrp) {
 		    attachtty(mypgrp);
 		    /* check window size and adjust if necessary */
 		    adjustwinsize(0);
@@ -656,6 +672,25 @@ update_job(Job jn)
     }
 }
 
+/**/
+void
+update_bg_job(Job jn, pid_t pid, int status)
+{
+    /*
+     * Accumulate a list of older jobs.  We only do this for
+     * background jobs, which is something in the job table
+     * that's not marked as in the current shell or as shell builtin
+     * and is not equal to the current foreground job.
+     */
+    if (jn && !(jn->stat & (STAT_CURSH|STAT_BUILTIN)) &&
+	jn - jobtab != thisjob) {
+	if (WIFEXITED(status))
+	    addbgstatus(pid, WEXITSTATUS(status));
+	else if (WIFSIGNALED(status))
+	    addbgstatus(pid, 0200 | WTERMSIG(status));
+    }
+}
+
 /* set the previous job to something reasonable */
 
 /**/
@@ -730,7 +765,7 @@ printhhmmss(double secs)
 }
 
 static void
-printtime(struct timeval *real, child_times_t *ti, char *desc)
+printtime(struct timespec *real, child_times_t *ti, char *desc)
 {
     char *s;
     double elapsed_time, user_time, system_time;
@@ -751,21 +786,21 @@ printtime(struct timeval *real, child_times_t *ti, char *desc)
     }
 
     /* go ahead and compute these, since almost every TIMEFMT will have them */
-    elapsed_time = real->tv_sec + real->tv_usec / 1000000.0;
+    elapsed_time = real->tv_sec + real->tv_nsec / 1000000000.0;
 
 #ifdef HAVE_GETRUSAGE
     user_time = ti->ru_utime.tv_sec + ti->ru_utime.tv_usec / 1000000.0;
     system_time = ti->ru_stime.tv_sec + ti->ru_stime.tv_usec / 1000000.0;
     total_time = user_time + system_time;
     percent = 100.0 * total_time
-	/ (real->tv_sec + real->tv_usec / 1000000.0);
+	/ (real->tv_sec + real->tv_nsec / 1000000000.0);
 #else
     {
 	long clktck = get_clktck();
 	user_time    = ti->ut / (double) clktck;
 	system_time  = ti->st / (double) clktck;
 	percent      =  100.0 * (ti->ut + ti->st)
-	    / (clktck * real->tv_sec + clktck * real->tv_usec / 1000000.0);
+	    / (clktck * real->tv_sec + clktck * real->tv_nsec / 1000000000.0);
     }
 #endif
 
@@ -817,6 +852,23 @@ printtime(struct timeval *real, child_times_t *ti, char *desc)
 		    break;
 		default:
 		    fprintf(stderr, "%%u");
+		    s--;
+		    break;
+		}
+		break;
+	    case 'n':
+		switch (*++s) {
+		case 'E':
+		    fprintf(stderr, "%0.fns", elapsed_time * 1000000000.0);
+		    break;
+		case 'U':
+		    fprintf(stderr, "%0.fns", user_time * 1000000000.0);
+		    break;
+		case 'S':
+		    fprintf(stderr, "%0.fns", system_time * 1000000000.0);
+		    break;
+		default:
+		    fprintf(stderr, "%%n");
 		    s--;
 		    break;
 		}
@@ -890,8 +942,13 @@ printtime(struct timeval *real, child_times_t *ti, char *desc)
 		break;
 #endif
 #ifdef HAVE_STRUCT_RUSAGE_RU_MAXRSS
+#ifdef RU_MAXRSS_IS_IN_BYTES
+# define MAXRSS_IN_KB(x) ((x)/1024)
+#else
+# define MAXRSS_IN_KB(x) (x)
+#endif
 	    case 'M':
-		fprintf(stderr, "%ld", ti->ru_maxrss / 1024);
+		fprintf(stderr, "%ld", MAXRSS_IN_KB(ti->ru_maxrss));
 		break;
 #endif
 #ifdef HAVE_STRUCT_RUSAGE_RU_MAJFLT
@@ -963,12 +1020,12 @@ static void
 dumptime(Job jn)
 {
     Process pn;
-    struct timeval dtimeval;
+    struct timespec dtimespec;
 
     if (!jn->procs)
 	return;
     for (pn = jn->procs; pn; pn = pn->next)
-	printtime(dtime(&dtimeval, &pn->bgtime, &pn->endtime), &pn->ti,
+	printtime(dtime_ts(&dtimespec, &pn->bgtime, &pn->endtime), &pn->ti,
 		  pn->text);
 }
 
@@ -1029,7 +1086,7 @@ should_report_time(Job j)
 	    return 1;
 #else
 	{
-	    clktck = get_clktck();
+	    long clktck = get_clktck();
 	    if ((j->procs->ti.ut + j->procs->ti.st) / clktck >= reporttime)
 		return 1;
 	}
@@ -1038,11 +1095,26 @@ should_report_time(Job j)
 
 #ifdef HAVE_GETRUSAGE
     if (reportmemory >= 0 &&
-	j->procs->ti.ru_maxrss / 1024 > reportmemory)
+	MAXRSS_IN_KB(j->procs->ti.ru_maxrss) > reportmemory)
 	return 1;
 #endif
 
     return 0;
+}
+
+/**/
+mod_export char *
+sigmsg(int sig)
+{
+    static char *unknown = "unknown signal";
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+    static char rtmsg[] = "real-time event XXX";
+    if (sig >= SIGRTMIN && sig <= SIGRTMAX) {
+	sprintf(rtmsg + sizeof(rtmsg) - 4, "%u", sig - SIGRTMIN + 1);
+	return rtmsg;
+    }
+#endif
+    return sig <= SIGCOUNT ? sig_msg[sig] : unknown;
 }
 
 /* !(lng & 3) means jobs    *
@@ -1374,8 +1446,10 @@ cleanfilelists(void)
 
     DPUTS(shell_exiting >= 0, "BUG: cleanfilelists() before exit");
  
-    for (i = 1; i <= maxjob; i++)
+    for (i = 1; i <= maxjob; i++) {
 	deletefilelist(jobtab[i].filelist, 0);
+	jobtab[i].filelist = 0;
+    }
 }
 
 /**/
@@ -1461,7 +1535,7 @@ deletejob(Job jn, int disowning)
 
 /**/
 void
-addproc(pid_t pid, char *text, int aux, struct timeval *bgtime,
+addproc(pid_t pid, char *text, int aux, struct timespec *bgtime,
 	int gleader, int list_pipe_job_used)
 {
     Process pn, *pnlist;
@@ -1488,10 +1562,7 @@ addproc(pid_t pid, char *text, int aux, struct timeval *bgtime,
 	 * set it for that, too.
 	 */
 	if (gleader != -1) {
-	    if (jobtab[thisjob].stat & STAT_CURSH)
-		jobtab[thisjob].gleader = gleader;
-	    else
-		jobtab[thisjob].gleader = pid;
+	    jobtab[thisjob].gleader = gleader;
 	    if (list_pipe_job_used != -1)
 		jobtab[list_pipe_job_used].gleader = gleader;
 	    /*
@@ -1500,7 +1571,7 @@ addproc(pid_t pid, char *text, int aux, struct timeval *bgtime,
 	     */
 	    last_attached_pgrp = gleader;
 	} else if (!jobtab[thisjob].gleader)
-		jobtab[thisjob].gleader = pid;
+	    jobtab[thisjob].gleader = pid;
 	/* attach this process to end of process list of current job */
 	pnlist = &jobtab[thisjob].procs;
     }
@@ -1536,8 +1607,10 @@ havefiles(void)
     int i;
 
     for (i = 1; i <= maxjob; i++)
-	if (jobtab[i].stat && jobtab[i].filelist)
+	if (jobtab[i].stat && jobtab[i].filelist &&
+	    peekfirst(jobtab[i].filelist)) {
 	    return 1;
+	}
     return 0;
 
 }
@@ -1758,7 +1831,7 @@ clearjobtab(int monitor)
 /* In a subshell, decide we want our own job table after all. */
 
 /**/
-mod_export void
+void
 clearoldjobtab(void)
 {
     if (oldjobtab)
@@ -1850,16 +1923,15 @@ spawnjob(void)
 
 /**/
 void
-shelltime(void)
+shelltime(child_times_t *shell, child_times_t *kids, struct timespec *then, int delta)
 {
-    struct timezone dummy_tz;
-    struct timeval dtimeval, now;
+    struct timespec dtimespec, now;
     child_times_t ti;
 #ifndef HAVE_GETRUSAGE
     struct tms buf;
 #endif
 
-    gettimeofday(&now, &dummy_tz);
+    zgettime_monotonic_if_available(&now);
 
 #ifdef HAVE_GETRUSAGE
     getrusage(RUSAGE_SELF, &ti);
@@ -1869,7 +1941,28 @@ shelltime(void)
     ti.ut = buf.tms_utime;
     ti.st = buf.tms_stime;
 #endif
-    printtime(dtime(&dtimeval, &shtimer, &now), &ti, "shell");
+    if (shell) {
+	if (delta) {
+#ifdef HAVE_GETRUSAGE
+	    dtime_tv(&ti.ru_utime, &shell->ru_utime, &ti.ru_utime);
+	    dtime_tv(&ti.ru_stime, &shell->ru_stime, &ti.ru_stime);
+#else
+	    ti.ut -= shell->ut;
+	    ti.st -= shell->st;
+#endif
+	} else
+	    *shell = ti;
+    }
+    if (delta)
+	dtime_ts(&dtimespec, then, &now);
+    else {
+	if (then)
+	    *then = now;
+	dtime_ts(&dtimespec, &shtimer, &now);
+    }
+
+    if (!delta == !shell)
+	printtime(&dtimespec, &ti, "shell");
 
 #ifdef HAVE_GETRUSAGE
     getrusage(RUSAGE_CHILDREN, &ti);
@@ -1877,8 +1970,20 @@ shelltime(void)
     ti.ut = buf.tms_cutime;
     ti.st = buf.tms_cstime;
 #endif
-    printtime(&dtimeval, &ti, "children");
-
+    if (kids) {
+	if (delta) {
+#ifdef HAVE_GETRUSAGE
+	    dtime_tv(&ti.ru_utime, &kids->ru_utime, &ti.ru_utime);
+	    dtime_tv(&ti.ru_stime, &kids->ru_stime, &ti.ru_stime);
+#else
+	    ti.ut -= shell->ut;
+	    ti.st -= shell->st;
+#endif
+	} else
+	    *kids = ti;
+    }
+    if (!delta == !kids)
+	printtime(&dtimespec, &ti, "children");
 }
 
 /* see if jobs need printing */
@@ -2402,7 +2507,7 @@ bin_fg(char *name, char **argv, Options ops, int func)
 	    int curmaxjob, ignorejob;
 	    if (unset(MONITOR) && oldmaxjob) {
 		jobptr = oldjobtab;
-		curmaxjob = oldmaxjob ? oldmaxjob - 1 : 0;
+		curmaxjob = oldmaxjob;
 		ignorejob = 0;
 	    } else {
 		jobptr = jobtab;
@@ -2506,6 +2611,7 @@ bin_fg(char *name, char **argv, Options ops, int func)
 		jobtab[job].stat &= ~STAT_CURSH;
 	    }
 	    if ((stopped = (jobtab[job].stat & STAT_STOPPED))) {
+		/* WIFCONTINUED will makerunning() again at killjb() */
 		makerunning(jobtab + job);
 		if (func == BIN_BG) {
 		    /* Set $! to indicate this was backgrounded */
@@ -2646,6 +2752,11 @@ static const struct {
     { "IO", SIGIO },
 #endif
 #endif
+#if defined(SIGABRT) && defined(SIGIOT)
+#if SIGABRT == SIGIOT
+    { "IOT", SIGIOT },
+#endif
+#endif
 #if !defined(SIGERR)
     /*
      * If SIGERR is not defined by the operating system, use it
@@ -2664,11 +2775,37 @@ static const struct {
 int
 bin_kill(char *nam, char **argv, UNUSED(Options ops), UNUSED(int func))
 {
-    int sig = SIGTERM;
+    int status, sig = SIGTERM;
     int returnval = 0;
+#ifdef HAVE_SIGQUEUE
+    union sigval sigqueue_info;
+#endif
+    int use_sigqueue = 0, got_sig = 0;
+
+    while (*argv && **argv == '-') {
+	if (!use_sigqueue && (*argv)[1] == 'q' && (*argv)[2] == '\0') {
+	    char *endp;
+
+	    if (!*++argv) {
+		zwarnnam(nam, "-q: argument expected");
+		return 1;
+	    }
+#ifdef HAVE_SIGQUEUE
+	    sigqueue_info.sival_int =
+#endif
+		    zstrtol(*argv, &endp, 10);
+	    if (*endp) {
+		zwarnnam(nam, "invalid number: %s", *argv);
+		return 1;
+	    }
+	    use_sigqueue = 1;
+	    argv++;
+	    continue;
+	}
+	if (got_sig)
+	    break;
 
     /* check for, and interpret, a signal specifier */
-    if (*argv && **argv == '-') {
 	if (idigit((*argv)[1])) {
 	    char *endp;
 	    /* signal specified by number */
@@ -2684,23 +2821,29 @@ bin_kill(char *nam, char **argv, UNUSED(Options ops), UNUSED(int func))
 	    if ((*argv)[1] == 'l' && (*argv)[2] == '\0') {
 		if (argv[1]) {
 		    while (*++argv) {
-			sig = zstrtol(*argv, &signame, 10);
+			status = zstrtol(*argv, &signame, 10);
 			if (signame == *argv) {
+			    signame = casemodify(signame, CASMOD_UPPER);
 			    if (!strncmp(signame, "SIG", 3))
 				signame += 3;
 			    for (sig = 1; sig <= SIGCOUNT; sig++)
-				if (!strcasecmp(sigs[sig], signame))
+				if (!strcmp(sigs[sig], signame))
 				    break;
 			    if (sig > SIGCOUNT) {
 				int i;
 
 				for (i = 0; alt_sigs[i].name; i++)
-				    if (!strcasecmp(alt_sigs[i].name, signame))
+				    if (!strcmp(alt_sigs[i].name, signame))
 				    {
 					sig = alt_sigs[i].num;
 					break;
 				    }
 			    }
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+			    if (sig > SIGCOUNT && (sig = rtsigno(signame))) {
+				printf("%d\n", sig);
+			    } else
+#endif
 			    if (sig > SIGCOUNT) {
 				zwarnnam(nam, "unknown signal: SIG%s",
 					 signame);
@@ -2713,14 +2856,15 @@ bin_kill(char *nam, char **argv, UNUSED(Options ops), UNUSED(int func))
 					 signame);
 				returnval++;
 			    } else {
-				if (WIFSIGNALED(sig))
-				    sig = WTERMSIG(sig);
-				else if (WIFSTOPPED(sig))
-				    sig = WSTOPSIG(sig);
+				sig = status & ~0200;
 				if (1 <= sig && sig <= SIGCOUNT)
 				    printf("%s\n", sigs[sig]);
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+				else if ((signame = rtsigname(sig, 0)))
+				    printf("%s\n", signame);
+#endif
 				else
-				    printf("%d\n", sig);
+				    printf("%d\n", status);
 			    }
 			}
 		    }
@@ -2729,7 +2873,42 @@ bin_kill(char *nam, char **argv, UNUSED(Options ops), UNUSED(int func))
 		printf("%s", sigs[1]);
 		for (sig = 2; sig <= SIGCOUNT; sig++)
 		    printf(" %s", sigs[sig]);
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+		for (sig = SIGRTMIN; sig <= SIGRTMAX; sig++)
+		    printf(" %s", rtsigname(sig, 0));
+#endif
 		putchar('\n');
+		return 0;
+	    }
+
+	    /* with argument "-L" list signals with their numbers in a table */
+	    if ((*argv)[1] == 'L' && (*argv)[2] == '\0') {
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+		const int width = SIGRTMAX >= 100 ? 3 : 2;
+#else
+		const int width = SIGCOUNT >= 100 ? 3 : 2;
+#endif
+		const int cols = zterm_columns >= 30 ?
+		    (zterm_columns < 90 ? zterm_columns / 15 : 6) : 1;
+
+		for (sig = 1; sig < SIGCOUNT
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+			+ 1
+#endif
+			; sig++)
+		{
+		    printf("%*d %-10s%c", width, sig, sigs[sig],
+			    sig % cols ? ' ' : '\n');
+		}
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+		for (sig = SIGRTMIN; sig < SIGRTMAX; sig++) {
+		    printf("%*d %-10s%c", width, sig, rtsigname(sig, 0),
+			    (sig - SIGRTMIN + SIGCOUNT + 1) % cols ? ' ' : '\n');
+		}
+		printf("%*d RTMAX\n", width, sig);
+#else
+		printf("%*d %s\n", width, sig, sigs[sig]);
+#endif
 		return 0;
 	    }
 
@@ -2777,14 +2956,19 @@ bin_kill(char *nam, char **argv, UNUSED(Options ops), UNUSED(int func))
 			    break;
 			}
 		}
-		if (sig > SIGCOUNT) {
+		if (sig > SIGCOUNT
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+			&& !(sig = rtsigno(signame))
+#endif
+			) {
 		    zwarnnam(nam, "unknown signal: SIG%s", signame);
-		    zwarnnam(nam, "type kill -l for a list of signals");
+		    zwarnnam(nam, "type kill -L for a list of signals");
 		    return 1;
 		}
 	    }
 	}
 	argv++;
+	got_sig = 1;
     }
 
     /* Discard the standard "-" and "--" option breaks */
@@ -2833,7 +3017,12 @@ bin_kill(char *nam, char **argv, UNUSED(Options ops), UNUSED(int func))
 	    returnval++;
 	} else {
 	    int pid = atoi(*argv);
-	    if (kill(pid, sig) == -1) {
+	    if (
+#ifdef HAVE_SIGQUEUE
+		use_sigqueue ? sigqueue(pid, sig, sigqueue_info) :
+#endif
+		kill(pid, sig) == -1)
+	    {
 		zwarnnam("kill", "kill %s failed: %e", *argv, errno);
 		returnval++;
 	    } 
@@ -2854,18 +3043,23 @@ bin_kill(char *nam, char **argv, UNUSED(Options ops), UNUSED(int func))
 
     return returnval < 126 ? returnval : 1;
 }
-/* Get a signal number from a string */
+
+/* Get index into table of traps from a string describing a signal */
 
 /**/
 mod_export int
-getsignum(const char *s)
+getsigidx(const char *s)
 {
     int x, i;
 
     /* check for a signal specified by number */
     x = atoi(s);
-    if (idigit(*s) && x >= 0 && x < VSIGCOUNT)
-	return x;
+    if (idigit(*s) && x >= 0 && (x < VSIGCOUNT
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+	|| (x >= SIGRTMIN && x <= SIGRTMAX)
+#endif
+	))
+	return SIGIDX(x);
 
     /* search for signal by name */
     if (!strncmp(s, "SIG", 3))
@@ -2881,11 +3075,16 @@ getsignum(const char *s)
 	    return alt_sigs[i].num;
     }
 
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+    if ((x = rtsigno(s)))
+	return SIGIDX(x);
+#endif
+
     /* no matching signal */
     return -1;
 }
 
-/* Get the name for a signal. */
+/* Get the name for a signal given the index into the traps table. */
 
 /**/
 mod_export const char *
@@ -2899,6 +3098,11 @@ getsigname(int sig)
 		return alt_sigs[i].name;
     }
     else
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+    if (sig >= VSIGCOUNT)
+	return rtsigname(SIGNUM(sig), 0);
+    else
+#endif
 	return sigs[sig];
 
     /* shouldn't reach here */
@@ -2923,9 +3127,21 @@ gettrapnode(int sig, int ignoredisable)
     else
 	getptr = shfunctab->getnode;
 
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+    if (sig >= VSIGCOUNT)
+	sprintf(fname, "TRAP%s", rtsigname(SIGNUM(sig), 0));
+    else
+#endif
     sprintf(fname, "TRAP%s", sigs[sig]);
     if ((hn = getptr(shfunctab, fname)))
 	return hn;
+
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+    if (sig >= VSIGCOUNT) {
+	sprintf(fname, "TRAP%s", rtsigname(SIGNUM(sig), 1));
+	return getptr(shfunctab, fname);
+    }
+#endif
 
     for (i = 0; alt_sigs[i].name; i++) {
 	if (alt_sigs[i].num == sig) {

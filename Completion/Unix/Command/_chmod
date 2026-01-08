@@ -8,7 +8,7 @@ aopts=( -A '-[^gorstuwxX]*' )
 
 args=( '*: :->files' '1: :_file_modes' )
 
-_pick_variant -r variant -b zsh gnu=Free\ Soft $OSTYPE --version
+_pick_variant -r variant -b zsh gnu='(Free Soft|uutils)' $OSTYPE --version
 case "$variant" in
   zsh)
     # Assign, not append because zf_chmod only supports octal modes.
@@ -19,6 +19,13 @@ case "$variant" in
       '*: :->files'
     )
     ;;
+  gnu|freebsd*|openbsd*|netbsd*|darwin*|dragonfly*)
+    args+=(
+      '(-H -L -P)-L[follow all symlinks]'
+      '(-H -L -P)-H[follow symlinks on the command line]'
+      '(-H -L -P)-P[do not follow symlinks (default)]'
+    )
+    ;|
   gnu)
     aopts=()
     args+=(
@@ -49,13 +56,6 @@ case "$variant" in
       '-h[operate on symlinks themselves]'
     )
     ;|
-  freebsd*|openbsd*|netbsd*|darwin*|dragonfly*)
-    args+=(
-      '(-H -L -P)-L[follow all symlinks]'
-      '(-H -L -P)-H[follow symlinks on the command line]'
-      '(-H -L -P)-P[do not follow symlinks (default)]'
-    )
-    ;|
   darwin*)
     args+=(
       '(1)-C[return false if any specified files have ACLs]'
@@ -67,13 +67,13 @@ case "$variant" in
     ;;
 esac
 
-_arguments -C -s -S $aopts "$args[@]" && ret=0
+_arguments -C -s -S -0 $aopts "$args[@]" && ret=0
 
 case "$state" in
   files)
     if [[ -n $opt_args[--reference] ]]; then
       zmodload -F zsh/stat b:zstat 2>/dev/null
-      typeset -i8 ref=$(zstat +mode $opt_args[--reference])
+      typeset -i8 ref=$(zstat +mode $opt_args[--reference]:Q)
       _wanted files expl file _files -g "*(-.^f${ref#??})" && ret=0
     elif [[ $line[1] = [0-7]## ]]; then
       _wanted files expl file _files -g "*(-.^f$line[1])" && ret=0

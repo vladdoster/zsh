@@ -489,7 +489,7 @@ static char *
 build_pos_string(LinkList list)
 {
     LinkNode node;
-    int l;
+    int l, buflen;
     char buf[40], *s;
     long p;
 
@@ -499,12 +499,12 @@ build_pos_string(LinkList list)
 	/* This could be used to put an extra colon before the end-of-word
 	 * position if there is nothing missing. */
 	if (p < 0)
-	    sprintf(buf, ":%ld", -p);
+	    buflen = sprintf(buf, ":%ld", -p);
 	else
 #endif
-	    sprintf(buf, "%ld", p);
-	setdata(node, dupstring(buf));
-	l += 1 + strlen(buf);
+	buflen = sprintf(buf, "%ld", p);
+	setdata(node, dupstring_wlen(buf, buflen));
+	l += 1 + buflen;
     }
     s = (char *) zalloc(l * sizeof(char));
     *s = 0;
@@ -897,7 +897,7 @@ void
 do_allmatches(UNUSED(int end))
 {
     int first = 1, nm = nmatches - 1, omc = menucmp, oma = menuacc, e;
-    Cmatch *mc;
+    Cmatch *mc = 0;
     struct menuinfo mi;
     char *p = (brbeg ? ztrdup(lastbrbeg->str) : NULL);
 
@@ -915,10 +915,10 @@ do_allmatches(UNUSED(int end))
 #endif
     }
 
+    if (minfo.group)
+	mc = (minfo.group)->matches;
 
-    mc = (minfo.group)->matches;
-
-    while (1) {
+    while (mc) {
 	if (!((*mc)->flags & CMF_ALL)) {
 	    if (!first)
 		accept_last();
@@ -1731,8 +1731,6 @@ calclist(int showall)
                                  width < zterm_columns && nth < g->dcount;
                                  nth++, tcol++) {
 
-                                m = *p;
-
                                 if (tcol == tcols) {
                                     tcol = 0;
                                     tlines++;
@@ -1963,7 +1961,7 @@ asklist(void)
 }
 
 /**/
-mod_export int
+static int
 printlist(int over, CLPrintFunc printm, int showall)
 {
     Cmgroup g;
@@ -1994,7 +1992,6 @@ printlist(int over, CLPrintFunc printm, int showall)
 		     (listdat.onlyexpl & ((*e)->always > 0 ? 2 : 1)))) {
 		    if (pnl) {
 			putc('\n', shout);
-			pnl = 0;
 			ml++;
 			if (cl >= 0 && --cl <= 1) {
 			    cl = -1;
@@ -2087,7 +2084,6 @@ printlist(int over, CLPrintFunc printm, int showall)
                         (showall || !(m->flags & (CMF_HIDE|CMF_NOLIST)))) {
 			if (pnl) {
 			    putc('\n', shout);
-			    pnl = 0;
 			    ml++;
 			    if (cl >= 0 && --cl <= 1) {
 				cl = -1;

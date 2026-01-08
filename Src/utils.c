@@ -74,9 +74,6 @@ set_widearray(char *mb_array, Widechar_array wca)
     }
     wca->len = 0;
 
-    if (!isset(MULTIBYTE))
-	return;
-
     if (mb_array) {
 	VARARR(wchar_t, tmpwcs, strlen(mb_array));
 	wchar_t *wcptr = tmpwcs;
@@ -86,9 +83,8 @@ set_widearray(char *mb_array, Widechar_array wca)
 	while (*mb_array) {
 	    int mblen;
 
-	    if (STOUC(*mb_array) <= 0x7f) {
-		mb_array++;
-		*wcptr++ = (wchar_t)*mb_array;
+	    if ((unsigned char) *mb_array <= 0x7f) {
+		*wcptr++ = (wchar_t)*mb_array++;
 		continue;
 	    }
 
@@ -126,14 +122,20 @@ set_widearray(char *mb_array, Widechar_array wca)
    (implemented by zerrmsg()):
 
    Code	Argument types		Prints
-   %s	const char *		C string (null terminated)
-   %l	const char *, int	C string of given length (null not required)
+   %s	const char *		C string (metafied, null terminated)
+     	                 	(output "nice")
+   %l	const char *, int	C string of given length (not metafied)
+     	                 	(output raw)
    %L	long			decimal value
    %d	int			decimal value
    %z	zlong			decimal value
    %%	(none)			literal '%'
    %c	int			character at that codepoint
-   %e	int			strerror() message (argument is typically 'errno')
+   %e	int			strerror() message (argument usually 'errno')
+     	                 	(output raw)
+
+   For %s and %l, the caller is responsible for assuring end-of-string
+   is not in the middle of a metafy pair (%s) or a multibyte character.
  */
 
 static void
@@ -314,14 +316,9 @@ zerrmsg(FILE *file, const char *fmt, va_list ap)
 		nicezputs(str, file);
 		break;
 	    case 'l': {
-		char *s;
 		str = va_arg(ap, const char *);
 		num = va_arg(ap, int);
-		num = metalen(str, num);
-		s = zhalloc(num + 1);
-		memcpy(s, str, num);
-		s[num] = '\0';
-		nicezputs(s, file);
+		fwrite(str, num, 1, file);
 		break;
 	    }
 	    case 'L':
@@ -380,11 +377,13 @@ zerrmsg(FILE *file, const char *fmt, va_list ap)
     fflush(file);
 }
 
+#ifdef HAVE_SETUPTERM
 /*
  * Wrapper for setupterm() and del_curterm().
  * These are called from terminfo.c and termcap.c.
  */
 static int term_count;	/* reference count of cur_term */
+#endif
 
 /**/
 mod_export void
@@ -717,7 +716,8 @@ wcs_nicechar(wchar_t c, size_t *widthp, char **swidep)
  */
 
 /**/
-mod_export int is_wcs_nicechar(wchar_t c)
+mod_export int
+is_wcs_nicechar(wchar_t c)
 {
     if (!WC_ISPRINT(c) && (c < 0x80 || !isset(PRINTEIGHTBIT))) {
 	if (c == 0x7f || c == L'\n' || c == L'\t' || c < 0x20)
@@ -1003,11 +1003,23 @@ print_if_link(char *s, int all)
 		}
 	    }
 	} else {
-	    if (chrealpath(&s, 'P', 0)) {
+#ifdef HAVE_MEMCCPY
+	    char s_at_entry[PATH_MAX+1];
+	    if (!memccpy(s_at_entry, s, '\0', sizeof(s_at_entry))) {
+		DPUTS1(1, "path longer than PATH_MAX: %s", s);
+		s_at_entry[PATH_MAX] = '\0';
+	    }
+#else /* HAVE_MEMCCPY */
+	    char *s_at_entry = ztrdup(s);
+#endif /* HAVE_MEMCCPY */
+	    if (chrealpath(&s, 'P', 0) && strcmp(s, s_at_entry)) {
 		printf(" -> ");
 		zputs(*s ? s : "/", stdout);
 		zsfree(s);
 	    }
+#ifndef HAVE_MEMCCPY
+	    zsfree(s_at_entry);
+#endif /* !HAVE_MEMCCPY */
 	}
     }
 }
@@ -1059,7 +1071,7 @@ uid_t cached_uid;
 char *cached_username;
 
 /**/
-char *
+mod_export char *
 get_username(void)
 {
 #ifdef USE_GETPWUID
@@ -1071,7 +1083,7 @@ get_username(void)
 	cached_uid = current_uid;
 	zsfree(cached_username);
 	if ((pswd = getpwuid(current_uid)))
-	    cached_username = ztrdup(pswd->pw_name);
+	    cached_username = ztrdup_metafy(pswd->pw_name);
 	else
 	    cached_username = ztrdup("");
     }
@@ -1543,6 +1555,7 @@ preprompt(void)
 	if (!eolmark)
 	    eolmark = "%B%S%#%s%b";
 	opts[PROMPTPERCENT] = 1;
+	txtunknownattrs = TXT_ATTR_ALL;
 	str = promptexpand(eolmark, 1, NULL, NULL, NULL);
 	countprompt(str, &w, 0, -1);
 	opts[PROMPTPERCENT] = percents;
@@ -1569,14 +1582,14 @@ preprompt(void)
     /* If 1) the parameter PERIOD exists, 2) a hook function for    *
      * "periodic" exists, 3) it's been greater than PERIOD since we *
      * executed any such hook, then execute it now.                 */
-    if (period && ((zlong)time(NULL) > (zlong)lastperiodic + period) &&
+    if (period && ((zlong)zmonotime(NULL) > (zlong)lastperiodic + period) &&
 	!callhookfunc("periodic", NULL, 1, NULL))
-	lastperiodic = time(NULL);
+	lastperiodic = zmonotime(NULL);
     if (errflag)
 	return;
 
     /* Check mail */
-    currentmailcheck = time(NULL);
+    currentmailcheck = zmonotime(NULL);
     if (mailcheck &&
 	(zlong) difftime(currentmailcheck, lastmailcheck) > mailcheck) {
 	char *mailfile;
@@ -1732,6 +1745,13 @@ freestr(void *a)
 mod_export void
 gettyinfo(struct ttyinfo *ti)
 {
+    fdgettyinfo(SHTTY, ti);
+}
+
+/**/
+mod_export void
+fdgettyinfo(int SHTTY, struct ttyinfo *ti)
+{
     if (SHTTY != -1) {
 #ifdef HAVE_TERMIOS_H
 # ifdef HAVE_TCGETATTR
@@ -1756,6 +1776,13 @@ gettyinfo(struct ttyinfo *ti)
 /**/
 mod_export void
 settyinfo(struct ttyinfo *ti)
+{
+    fdsettyinfo(SHTTY, ti);
+}
+
+/**/
+mod_export void
+fdsettyinfo(int SHTTY, struct ttyinfo *ti)
 {
     if (SHTTY != -1) {
 #ifdef HAVE_TERMIOS_H
@@ -1995,6 +2022,28 @@ redup(int x, int y)
 {
     int ret = y;
 
+#if HAVE_DECL_FPURGE
+    /* Make sure buffers are cleared when changing descriptor for a
+     * FILE object.  No fflush() here because the only way anything
+     * can legitimately be left in the buffer is when an error has
+     * occurred, so attempting flush here would at best error again
+     * and at worst squirt out something unexpected.
+     */
+    if (stdout && y == fileno(stdout))
+	fpurge(stdout);
+    if (stderr && y == fileno(stderr))
+	fpurge(stderr);
+    if (shout && y == fileno(shout))
+	fpurge(shout);
+    if (xtrerr && y == fileno(xtrerr))
+	fpurge(xtrerr);
+#ifndef _IONBF
+    /* See init.c setupshin() -- stdin otherwise unbuffered */
+    if (stdin && y == fileno(stdin))
+	fpurge(stdin);
+#endif
+#endif
+
     if(x < 0)
 	zclose(y);
     else if (x != y) {
@@ -2022,7 +2071,7 @@ redup(int x, int y)
  * Add an fd opened ithin a module.
  *
  * fdt is the type of the fd; see the FDT_ definitions in zsh.h.
- * The most likely falures are:
+ * The most likely failures are:
  *
  * FDT_EXTERNAL: the fd can be used within the shell for normal I/O but
  * it will not be closed automatically or by normal shell syntax.
@@ -2699,7 +2748,7 @@ read_poll(int fd, int *readchar, int polltty, zlong microseconds)
  */
 
 /**/
-long
+mod_export long
 timespec_diff_us(const struct timespec *t1, const struct timespec *t2)
 {
     int reverse = (t1->tv_sec > t2->tv_sec);
@@ -2724,6 +2773,19 @@ timespec_diff_us(const struct timespec *t1, const struct timespec *t2)
     return (reverse ? LONG_MIN : LONG_MAX);
 }
 
+/* Like time(), but uses the monotonic clock */
+
+/**/
+mod_export int
+zmonotime(time_t *tloc)
+{
+    struct timespec ts;
+    zgettime_monotonic_if_available(&ts);
+    if (tloc)
+	*tloc = ts.tv_sec;
+    return ts.tv_sec;
+}
+
 /*
  * Sleep for the given number of microseconds --- must be within
  * range of a long at the moment, but this is only used for
@@ -2731,7 +2793,7 @@ timespec_diff_us(const struct timespec *t1, const struct timespec *t2)
  */
 
 /**/
-int
+mod_export int
 zsleep(long us)
 {
 #ifdef HAVE_NANOSLEEP
@@ -2757,7 +2819,9 @@ zsleep(long us)
 
 /**
  * Sleep for time (fairly) randomly up to max_us microseconds.
- * Don't let the wallclock time extend beyond end_time.
+ * Don't let the time extend beyond end_time. end_time is compared to
+ * the current *monotonic* clock time, so do NOT base it on e.g. time(2);
+ * use zmonotime() or zgettime_monotonic_if_available().
  * Return 1 if that seemed to work, else 0.
  *
  * For best results max_us should be a multiple of 2**16 or large
@@ -2769,7 +2833,7 @@ int
 zsleep_random(long max_us, time_t end_time)
 {
     long r;
-    time_t now = time(NULL);
+    time_t now = zmonotime(NULL);
 
     /*
      * Randomish backoff.  Doesn't need to be fundamentally
@@ -2920,7 +2984,7 @@ read1char(int echo)
     restore_queue_signals(q);
     if (echo)
 	write_loop(SHTTY, &c, 1);
-    return STOUC(c);
+    return (unsigned char) c;
 }
 
 /**/
@@ -3122,7 +3186,7 @@ spckword(char **s, int hist, int cmd, int ask)
 
     if (**s == String && !*t) {
 	guess = *s + 1;
-	if (itype_end(guess, IIDENT, 1) == guess)
+	if (itype_end(guess, INAMESPC, 1) == guess)
 	    return;
 	ic = String;
 	d = 100;
@@ -3211,7 +3275,7 @@ spckword(char **s, int hist, int cmd, int ask)
 		x = 'n';
 	    } else if (shout) {
 		char *pptbuf;
-		pptbuf = promptexpand(sprompt, 0, best, guess, NULL);
+		pptbuf = promptexpand(sprompt, 0, NULL, best, guess);
 		zputs(pptbuf, shout);
 		free(pptbuf);
 		fflush(shout);
@@ -4118,27 +4182,41 @@ inittyptab(void)
      * having IIDENT here is a good idea at all, but this code
      * should disappear into history...
      */
-    for (t0 = 0240; t0 != 0400; t0++)
-	typtab[t0] = IALPHA | IALNUM | IIDENT | IUSER | IWORD;
+    if isset(MULTIBYTE)
+	for (t0 = 0240; t0 != 0400; t0++)
+	    typtab[t0] = IALPHA | IALNUM | IIDENT | IUSER | IWORD;
 #endif
     /* typtab['.'] |= IIDENT; */ /* Allow '.' in variable names - broken */
     typtab['_'] = IIDENT | IUSER;
-    typtab['-'] = typtab['.'] = typtab[STOUC(Dash)] = IUSER;
+    typtab['-'] = typtab['.'] = typtab[(unsigned char) Dash] = IUSER;
     typtab[' '] |= IBLANK | INBLANK;
     typtab['\t'] |= IBLANK | INBLANK;
     typtab['\n'] |= INBLANK;
     typtab['\0'] |= IMETA;
-    typtab[STOUC(Meta)  ] |= IMETA;
-    typtab[STOUC(Marker)] |= IMETA;
-    for (t0 = (int)STOUC(Pound); t0 <= (int)STOUC(LAST_NORMAL_TOK); t0++)
+    typtab[(unsigned char) Meta  ] |= IMETA;
+    typtab[(unsigned char) Marker] |= IMETA;
+    for (t0 = (int) (unsigned char) Pound; t0 <= (int) (unsigned char) LAST_NORMAL_TOK; t0++)
 	typtab[t0] |= ITOK | IMETA;
-    for (t0 = (int)STOUC(Snull); t0 <= (int)STOUC(Nularg); t0++)
+    for (t0 = (int) (unsigned char) Snull; t0 <= (int) (unsigned char) Nularg; t0++)
 	typtab[t0] |= ITOK | IMETA | INULL;
-    for (s = ifs ? ifs : EMULATION(EMULATE_KSH|EMULATE_SH) ?
-	DEFAULT_IFS_SH : DEFAULT_IFS; *s; s++) {
-	int c = STOUC(*s == Meta ? *++s ^ 32 : *s);
+     /* ifs */
+#define CURRENT_DEFAULT_IFS (EMULATION(EMULATE_KSH|EMULATE_SH) ? \
+			    DEFAULT_IFS_SH : DEFAULT_IFS)
 #ifdef MULTIBYTE_SUPPORT
-	if (!isascii(c)) {
+    if (isset(MULTIBYTE)) {
+	set_widearray(ifs ? ifs : CURRENT_DEFAULT_IFS, &ifs_wide);
+	if (ifs && !ifs_wide.chars) {
+	    zwarn("IFS has an invalid character; resetting IFS to default");
+	    zsfree(ifs);
+	    ifs = ztrdup(CURRENT_DEFAULT_IFS);
+	    set_widearray(ifs, &ifs_wide);
+	}
+    }
+#endif
+     for (s = ifs ? ifs : CURRENT_DEFAULT_IFS; *s; s++) {
+	int c = (unsigned char) (*s == Meta ? *++s ^ 32 : *s);
+#ifdef MULTIBYTE_SUPPORT
+	if (isset(MULTIBYTE) && !isascii(c)) {
 	    /* see comment for wordchars below */
 	    continue;
 	}
@@ -4151,10 +4229,15 @@ inittyptab(void)
 	}
 	typtab[c] |= ISEP;
     }
-    for (s = wordchars ? wordchars : DEFAULT_WORDCHARS; *s; s++) {
-	int c = STOUC(*s == Meta ? *++s ^ 32 : *s);
+    /* wordchars */
 #ifdef MULTIBYTE_SUPPORT
-	if (!isascii(c)) {
+    if (isset(MULTIBYTE))
+	set_widearray(wordchars, &wordchars_wide);
+#endif
+    for (s = wordchars ? wordchars : DEFAULT_WORDCHARS; *s; s++) {
+	int c = (unsigned char) (*s == Meta ? *++s ^ 32 : *s);
+#ifdef MULTIBYTE_SUPPORT
+	if (isset(MULTIBYTE) && !isascii(c)) {
 	    /*
 	     * If we have support for multibyte characters, we don't
 	     * handle non-ASCII characters here; instead, we turn
@@ -4167,22 +4250,17 @@ inittyptab(void)
 #endif
 	typtab[c] |= IWORD;
     }
-#ifdef MULTIBYTE_SUPPORT
-    set_widearray(wordchars, &wordchars_wide);
-    set_widearray(ifs ? ifs : EMULATION(EMULATE_KSH|EMULATE_SH) ?
-	DEFAULT_IFS_SH : DEFAULT_IFS, &ifs_wide);
-#endif
     for (s = SPECCHARS; *s; s++)
-	typtab[STOUC(*s)] |= ISPECIAL;
+	typtab[(unsigned char) *s] |= ISPECIAL;
     if (typtab_flags & ZTF_SP_COMMA)
-	typtab[STOUC(',')] |= ISPECIAL;
+	typtab[(unsigned char) ','] |= ISPECIAL;
     if (isset(BANGHIST) && bangchar && (typtab_flags & ZTF_INTERACT)) {
 	typtab_flags |= ZTF_BANGCHAR;
 	typtab[bangchar] |= ISPECIAL;
     } else
 	typtab_flags &= ~ZTF_BANGCHAR;
     for (s = PATCHARS; *s; s++)
-	typtab[STOUC(*s)] |= IPATTERN;
+	typtab[(unsigned char) *s] |= IPATTERN;
 
     unqueue_signals();
 }
@@ -4193,10 +4271,10 @@ makecommaspecial(int yesno)
 {
     if (yesno != 0) {
 	typtab_flags |= ZTF_SP_COMMA;
-	typtab[STOUC(',')] |= ISPECIAL;
+	typtab[(unsigned char) ','] |= ISPECIAL;
     } else {
 	typtab_flags &= ~ZTF_SP_COMMA;
-	typtab[STOUC(',')] &= ~ISPECIAL;
+	typtab[(unsigned char) ','] &= ~ISPECIAL;
     }
 }
 
@@ -4309,13 +4387,27 @@ wcsitype(wchar_t c, int itype)
  * If "once" is set, just test the first character, i.e. (outptr !=
  * inptr) tests whether the first character is valid in an identifier.
  *
- * Currently this is only called with itype IIDENT, IUSER or ISEP.
+ * Currently called only with itype INAMESPC, IIDENT, IUSER or ISEP.
  */
 
 /**/
 mod_export char *
 itype_end(const char *ptr, int itype, int once)
 {
+    if (itype == INAMESPC) {
+	itype = IIDENT;
+	if (!isset(POSIXIDENTIFIERS) || EMULATION(EMULATE_KSH)) {
+	    /* Special case for names containing ".", ksh93 namespaces */
+	    char *t = itype_end(ptr + (*ptr == '.'), itype, 0);
+	    if (t > ptr + (*ptr == '.')) {
+		if (*t == '.')
+		    ptr = t + 1;	/* Fall through */
+		else if (!once)
+		    return t;
+	    }
+	}
+    }
+
 #ifdef MULTIBYTE_SUPPORT
     if (isset(MULTIBYTE) &&
 	(itype != IIDENT || !isset(POSIXIDENTIFIERS))) {
@@ -4336,7 +4428,7 @@ itype_end(const char *ptr, int itype, int once)
 
 		if (wc == WEOF) {
 		    /* invalid, treat as single character */
-		    int chr = STOUC(*ptr == Meta ? ptr[1] ^ 32 : *ptr);
+		    int chr = (unsigned char) (*ptr == Meta ? ptr[1] ^ 32 : *ptr);
 		    /* in this case non-ASCII characters can't match */
 		    if (chr > 127 || !zistype(chr,itype))
 			break;
@@ -4375,7 +4467,7 @@ itype_end(const char *ptr, int itype, int once)
     } else
 #endif
 	for (;;) {
-	    int chr = STOUC(*ptr == Meta ? ptr[1] ^ 32 : *ptr);
+	    int chr = (unsigned char) (*ptr == Meta ? ptr[1] ^ 32 : *ptr);
 	    if (!zistype(chr,itype))
 		break;
 	    ptr += (*ptr == Meta) ? 2 : 1;
@@ -4983,11 +5075,11 @@ unmeta_one(const char *in, int *sz)
     *sz = mb_metacharlenconv_r(in, &wc, &wstate);
 #else
     if (in[0] == Meta) {
-      *sz = 2;
-      wc = STOUC(in[1] ^ 32);
+	*sz = 2;
+	wc = (unsigned char) (in[1] ^ 32);
     } else {
-      *sz = 1;
-      wc = STOUC(in[0]);
+	*sz = 1;
+	wc = (unsigned char) in[0];
     }
 #endif
     return wc;
@@ -5022,11 +5114,11 @@ ztrcmp(char const *s1, char const *s2)
 
     if(!(c1 = *s1))
 	c1 = -1;
-    else if(c1 == STOUC(Meta))
+    else if(c1 == (unsigned char) Meta)
 	c1 = *++s1 ^ 32;
     if(!(c2 = *s2))
 	c2 = -1;
-    else if(c2 == STOUC(Meta))
+    else if(c2 == (unsigned char) Meta)
 	c2 = *++s2 ^ 32;
 
     if(c1 == c2)
@@ -5212,6 +5304,7 @@ nicedupstring(char const *s)
 }
 
 
+/**/
 #ifndef MULTIBYTE_SUPPORT
 /* Unmetafy and output a string, displaying special characters readably. */
 
@@ -5246,8 +5339,9 @@ niceztrlen(char const *s)
     }
     return l;
 }
-#endif
 
+/**/
+#endif
 
 /**/
 #ifdef MULTIBYTE_SUPPORT
@@ -5458,7 +5552,7 @@ mb_metacharlenconv_r(const char *s, wint_t *wcp, mbstate_t *mbsp)
     const char *ptr;
     wchar_t wc;
 
-    if (STOUC(*s) <= 0x7f) {
+    if ((unsigned char) *s <= 0x7f) {
 	if (wcp)
 	    *wcp = (wint_t)*s;
 	return 1;
@@ -5516,10 +5610,10 @@ mb_metacharlenconv_r(const char *s, wint_t *wcp, mbstate_t *mbsp)
 mod_export int
 mb_metacharlenconv(const char *s, wint_t *wcp)
 {
-    if (!isset(MULTIBYTE) || STOUC(*s) <= 0x7f) {
+    if (!isset(MULTIBYTE) || (unsigned char) *s <= 0x7f) {
 	/* treat as single byte, possibly metafied */
 	if (wcp)
-	    *wcp = (wint_t)(*s == Meta ? s[1] ^ 32 : *s);
+	    *wcp = (wint_t)(unsigned char) (*s == Meta ? s[1] ^ 32 : *s);
 	return 1 + (*s == Meta);
     }
     /*
@@ -5581,7 +5675,7 @@ mb_metastrlenend(char *ptr, int width, char *eptr)
 	    inchar = *ptr;
 	ptr++;
 
-	if (complete && STOUC(inchar) <= STOUC(0x7f)) {
+	if (complete && (unsigned char) inchar <= (unsigned char) 0x7f) {
 	    /*
 	     * We rely on 7-bit US-ASCII as a subset, so skip
 	     * multibyte handling if we have such a character.
@@ -5657,7 +5751,7 @@ mb_charlenconv_r(const char *s, int slen, wint_t *wcp, mbstate_t *mbsp)
     const char *ptr;
     wchar_t wc;
 
-    if (slen && STOUC(*s) <= 0x7f) {
+    if (slen && (unsigned char) *s <= 0x7f) {
 	if (wcp)
 	    *wcp = (wint_t)*s;
 	return 1;
@@ -5698,7 +5792,7 @@ mb_charlenconv_r(const char *s, int slen, wint_t *wcp, mbstate_t *mbsp)
 mod_export int
 mb_charlenconv(const char *s, int slen, wint_t *wcp)
 {
-    if (!isset(MULTIBYTE) || STOUC(*s) <= 0x7f) {
+    if (!isset(MULTIBYTE) || (unsigned char) *s <= 0x7f) {
 	if (wcp)
 	    *wcp = (wint_t)*s;
 	return 1;
@@ -5717,7 +5811,7 @@ mod_export int
 metacharlenconv(const char *x, int *c)
 {
     /*
-     * Here we don't use STOUC() on the chars since they
+     * Here we don't use an (unsigned char)  cast on the chars since they
      * may be compared against other chars and this will fail
      * if chars are signed and the high bit is set.
      */
@@ -5779,7 +5873,7 @@ sb_niceformat(const char *s, FILE *stream, char **outstrp, int flags)
     eptr = ptr + umlen;
 
     while (ptr < eptr) {
-	int c = STOUC(*ptr);
+	int c = (unsigned char) *ptr;
 	if (c == '\'' && (flags & NICEFLAG_QUOTE)) {
 	    fmt = "\\'";
 	    newl = 2;
@@ -5996,9 +6090,9 @@ addunprintable(char *v, const char *u, const char *uend)
 	 */
 	int c;
 	if (*u == Meta)
-	    c = STOUC(*++u ^ 32);
+	    c = (unsigned char) (*++u ^ 32);
 	else
-	    c = STOUC(*u);
+	    c = (unsigned char) *u;
 	switch (c) {
 	case '\0':
 	    *v++ = '\\';
@@ -6645,11 +6739,14 @@ dquotedzputs(char const *s, FILE *stream)
 # if defined(HAVE_NL_LANGINFO) && defined(CODESET) && !defined(__STDC_ISO_10646__)
 /* Convert a character from UCS4 encoding to UTF-8 */
 
-static size_t
+static int
 ucs4toutf8(char *dest, unsigned int wval)
 {
-    size_t len;
+    int len;
 
+    /* UCS4 is now equvalent to UTF-32 and limited to 0 - 0x10_FFFF.
+     * This function accepts 0 - 0x7FFF_FFFF (old range of UCS4) to be
+     * compatible with wctomb(3) (in UTF-8 locale) on Linux. */
     if (wval < 0x80)
       len = 1;
     else if (wval < 0x800)
@@ -6660,8 +6757,12 @@ ucs4toutf8(char *dest, unsigned int wval)
       len = 4;
     else if (wval < 0x4000000)
       len = 5;
-    else
+    else if (wval < 0x80000000)
       len = 6;
+    else {
+      zerr("character not in range");
+      return -1;
+    }
 
     switch (len) { /* falls through except to the last case */
     case 6: dest[5] = (wval & 0x3f) | 0x80; wval >>= 6;
@@ -6678,30 +6779,89 @@ ucs4toutf8(char *dest, unsigned int wval)
 }
 #endif
 
+/* Convert UCS4 to a multibyte character in current locale.
+ * Result is saved in buf (must be at least MB_CUR_MAX bytes long).
+ * Returns the number of bytes saved in buf, or -1 if conversion fails. */
 
-/*
- * The following only occurs once or twice in the code, but in different
- * places depending how character set conversion is implemented.
- */
-#define CHARSET_FAILED()		      \
-    if (how & GETKEY_DOLLAR_QUOTE) {	      \
-	while ((*tdest++ = *++s)) {	      \
-	    if (how & GETKEY_UPDATE_OFFSET) { \
-		if (s - sstart > *misc)	      \
-		    (*misc)++;		      \
-	    }				      \
-	    if (*s == Snull) {		      \
-		*len = (s - sstart) + 1;      \
-		*tdest = '\0';		      \
-		return buf;		      \
-	    }				      \
-	}				      \
-	*len = tdest - buf;		      \
-	return buf;			      \
-    }					      \
-    *t = '\0';				      \
-    *len = t - buf;			      \
-    return buf
+/**/
+int
+ucs4tomb(unsigned int wval, char *buf)
+{
+#if defined(HAVE_WCHAR_H) && defined(HAVE_WCTOMB) && defined(__STDC_ISO_10646__)
+    int count = wctomb(buf, (wchar_t)wval);
+    if (count == -1)
+	zerr("character not in range");
+    return count;
+#else	/* !(HAVE_WCHAR_H && HAVE_WCTOMB && __STDC_ISO_10646__) */
+# if defined(HAVE_NL_LANGINFO) && defined(CODESET)
+    if (!strcmp(nl_langinfo(CODESET), "UTF-8")) {
+	return ucs4toutf8(buf, wval);
+    } else {
+#   ifdef HAVE_ICONV
+	iconv_t cd;
+	char inbuf[4], *bsave = buf;
+	ICONV_CONST char *inptr = inbuf;
+	size_t inbytes = 4, outbytes = 6;
+	const char *codesetstr = nl_langinfo(CODESET);
+	size_t count;
+	int i;
+
+	/*
+	 * If the code set isn't handled, we'd better assume it's US-ASCII
+	 * rather than just failing hopelessly.  Solaris has a weird habit
+	 * of returning 646.  This is handled by the native iconv(), but
+	 * not by GNU iconv; what's more, some versions of the native iconv
+	 * don't handle standard names like ASCII.
+	 *
+	 * This should only be a problem if there's a mismatch between the
+	 * NLS and the iconv in use, which probably only means if libiconv
+	 * is in use.  We checked at configure time if our libraries pulled
+	 * in _libiconv_version, which should be a good test.
+	 *
+	 * It shouldn't ever be NULL, but while we're being paranoid...
+	 */
+#     ifdef ICONV_FROM_LIBICONV
+	if (!codesetstr || !*codesetstr)
+	    codesetstr = "US-ASCII";
+#     endif
+	cd = iconv_open(codesetstr, "UCS-4BE");
+#     ifdef ICONV_FROM_LIBICONV
+	if (cd == (iconv_t)-1 &&  !strcmp(codesetstr, "646")) {
+	    codesetstr = "US-ASCII";
+	    cd = iconv_open(codesetstr, "UCS-4BE");
+	}
+#     endif
+	if (cd == (iconv_t)-1) {
+	    zerr("cannot do charset conversion (iconv failed)");
+	    return -1;
+	}
+
+	/* store value in big endian form */
+	for (i=3; i>=0; i--) {
+	    inbuf[i] = wval & 0xff;
+	    wval >>= 8;
+	}
+	count = iconv(cd, &inptr, &inbytes, &buf, &outbytes);
+	iconv_close(cd);
+	if (count) {
+	    /* -1 indicates error. Positive value means number of "invalid"
+	     * (or "non-reversible") conversions, which we consider as
+	     * "out-of-range" characters. */
+	    zerr("character not in range");
+	    return -1;
+	}
+	return buf - bsave;
+#   else    /* !HAVE_ICONV */
+	zerr("cannot do charset conversion (iconv not available)");
+	return -1;
+#   endif   /* HAVE_ICONV */
+    }
+# else	/* !(HAVE_NL_LANGINFO && CODESET) */
+    zerr("cannot do charset conversion (NLS not supported)");
+    return -1;
+# endif	/* HAVE_NL_LANGINFO && CODESET */
+#endif	/* HAVE_WCHAR_H && HAVE_WCTOMB && __STDC_ISO_10646__ */
+}
 
 /*
  * Decode a key string, turning it into the literal characters.
@@ -6758,21 +6918,6 @@ getkeystring(char *s, int *len, int how, int *misc)
     char *t, *tdest = NULL, *u = NULL, *sstart = s, *tbuf = NULL;
     char svchar = '\0';
     int meta = 0, control = 0, ignoring = 0;
-    int i;
-#if defined(HAVE_WCHAR_H) && defined(HAVE_WCTOMB) && defined(__STDC_ISO_10646__)
-    wint_t wval;
-    int count;
-#else
-    unsigned int wval;
-# if defined(HAVE_NL_LANGINFO) && defined(CODESET)
-#  if defined(HAVE_ICONV)
-    iconv_t cd;
-    char inbuf[4];
-    size_t inbytes, outbytes;
-#  endif
-    size_t count;
-# endif
-#endif
 
     DPUTS((how & GETKEY_UPDATE_OFFSET) &&
 	  (how & ~(GETKEYS_DOLLARS_QUOTE|GETKEY_UPDATE_OFFSET)),
@@ -6837,7 +6982,8 @@ getkeystring(char *s, int *len, int how, int *misc)
     }
     for (; *s; s++) {
 	if (*s == '\\' && s[1]) {
-	    int miscadded;
+	    int miscadded, count, i;
+	    unsigned int wval;
 	    if ((how & GETKEY_UPDATE_OFFSET) && s - sstart < *misc) {
 		(*misc)--;
 		miscadded = 1;
@@ -6952,86 +7098,32 @@ getkeystring(char *s, int *len, int how, int *misc)
 		    *misc = wval;
 		    return s+1;
 		}
-#if defined(HAVE_WCHAR_H) && defined(HAVE_WCTOMB) && defined(__STDC_ISO_10646__)
-		count = wctomb(t, (wchar_t)wval);
+		count = ucs4tomb(wval, t);
 		if (count == -1) {
-		    zerr("character not in range");
-		    CHARSET_FAILED();
+		    if (how & GETKEY_DOLLAR_QUOTE) {
+			while ((*tdest++ = *++s)) {
+			    if (how & GETKEY_UPDATE_OFFSET) {
+				if (s - sstart > *misc)
+				    (*misc)++;
+			    }
+			    if (*s == Snull) {
+				*len = (s - sstart) + 1;
+				*tdest = '\0';
+				return buf;
+			    }
+			}
+			*len = tdest - buf;
+		    }
+		    else {
+			*t = '\0';
+			*len = t - buf;
+		    }
+		    return buf;
 		}
 		if ((how & GETKEY_UPDATE_OFFSET) && s - sstart < *misc)
 		    (*misc) += count;
 		t += count;
-# else
-#  if defined(HAVE_NL_LANGINFO) && defined(CODESET)
-		if (!strcmp(nl_langinfo(CODESET), "UTF-8")) {
-		    count = ucs4toutf8(t, wval);
-		    t += count;
-		    if ((how & GETKEY_UPDATE_OFFSET) && s - sstart < *misc)
-			(*misc) += count;
-		} else {
-#   ifdef HAVE_ICONV
-		    ICONV_CONST char *inptr = inbuf;
-		    const char *codesetstr = nl_langinfo(CODESET);
-    	    	    inbytes = 4;
-		    outbytes = 6;
-		    /* store value in big endian form */
-		    for (i=3;i>=0;i--) {
-			inbuf[i] = wval & 0xff;
-			wval >>= 8;
-		    }
 
-		    /*
-		     * If the code set isn't handled, we'd better
-		     * assume it's US-ASCII rather than just failing
-		     * hopelessly.  Solaris has a weird habit of
-		     * returning 646.  This is handled by the
-		     * native iconv(), but not by GNU iconv; what's
-		     * more, some versions of the native iconv don't
-		     * handle standard names like ASCII.
-		     *
-		     * This should only be a problem if there's a
-		     * mismatch between the NLS and the iconv in use,
-		     * which probably only means if libiconv is in use.
-		     * We checked at configure time if our libraries
-		     * pulled in _libiconv_version, which should be
-		     * a good test.
-		     *
-		     * It shouldn't ever be NULL, but while we're
-		     * being paranoid...
-		     */
-#ifdef ICONV_FROM_LIBICONV
-		    if (!codesetstr || !*codesetstr)
-			codesetstr = "US-ASCII";
-#endif
-    	    	    cd = iconv_open(codesetstr, "UCS-4BE");
-#ifdef ICONV_FROM_LIBICONV
-		    if (cd == (iconv_t)-1 &&  !strcmp(codesetstr, "646")) {
-			codesetstr = "US-ASCII";
-			cd = iconv_open(codesetstr, "UCS-4BE");
-		    }
-#endif
-		    if (cd == (iconv_t)-1) {
-			zerr("cannot do charset conversion (iconv failed)");
-			CHARSET_FAILED();
-		    }
-                    count = iconv(cd, &inptr, &inbytes, &t, &outbytes);
-		    iconv_close(cd);
-		    if (count == (size_t)-1) {
-                        zerr("character not in range");
-			CHARSET_FAILED();
-		    }
-		    if ((how & GETKEY_UPDATE_OFFSET) && s - sstart < *misc)
-			(*misc) += count;
-#   else
-                    zerr("cannot do charset conversion (iconv not available)");
-		    CHARSET_FAILED();
-#   endif
-		}
-#  else
-                zerr("cannot do charset conversion (NLS not supported)");
-		CHARSET_FAILED();
-#  endif
-# endif
 		if (how & GETKEY_DOLLAR_QUOTE) {
 		    char *t2;
 		    for (t2 = tbuf; t2 < t; t2++) {
@@ -7104,7 +7196,7 @@ getkeystring(char *s, int *len, int how, int *misc)
 	    continue;
 #ifdef MULTIBYTE_SUPPORT
 	} else if ((how & GETKEY_SINGLE_CHAR) &&
-		   isset(MULTIBYTE) && STOUC(*s) > 127) {
+		   isset(MULTIBYTE) && (unsigned char) *s > 127) {
 	    wint_t wc;
 	    int len;
 	    len = mb_metacharlenconv(s, &wc);
@@ -7207,7 +7299,7 @@ getkeystring(char *s, int *len, int how, int *misc)
 	    t = tbuf;
 	}
 	if ((how & GETKEY_SINGLE_CHAR) && t != tmp) {
-	    *misc = STOUC(tmp[0]);
+	    *misc = (unsigned char) tmp[0];
 	    return s + 1;
 	}
     }
@@ -7498,8 +7590,8 @@ restoredir(struct dirsav *d)
     else if (d->level < 0)
 	err = -1;
     if (d->dev || d->ino) {
-	stat(".", &sbuf);
-	if (sbuf.st_ino != d->ino || sbuf.st_dev != d->dev)
+	if (stat(".", &sbuf) < 0 ||
+	    sbuf.st_ino != d->ino || sbuf.st_dev != d->dev)
 	    err = -2;
     }
     return err;
@@ -7524,9 +7616,9 @@ privasserted(void)
 	    /* POSIX doesn't define a way to test whether a capability set *
 	     * is empty or not.  Typical.  I hope this is conforming...    */
 	    cap_flag_value_t val;
-	    cap_value_t n;
-	    for(n = 0; !cap_get_flag(caps, n, CAP_EFFECTIVE, &val); n++)
-		if(val) {
+	    cap_value_t cap;
+	    for(cap = 0; !cap_get_flag(caps, cap, CAP_EFFECTIVE, &val); cap++)
+		if(val && cap != CAP_WAKE_ALARM) {
 		    cap_free(caps);
 		    return 1;
 		}
@@ -7570,6 +7662,7 @@ mode_to_octal(mode_t mode)
     return m;
 }
 
+/**/
 #ifdef MAILDIR_SUPPORT
 /*
  *     Stat a file. If it's a maildir, check all messages
@@ -7693,4 +7786,6 @@ mailstat(char *path, struct stat *st)
        *st = st_ret_last = st_ret;
        return 0;
 }
+
+/**/
 #endif

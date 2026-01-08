@@ -186,7 +186,7 @@ typedef struct thingy *Thingy;
 
 /* widgets (ZLE functions) */
 
-typedef int (*ZleIntFunc) _((char **));
+typedef int (*ZleIntFunc) (char **);
 
 struct widget {
     int flags;		/* flags (see below) */
@@ -258,6 +258,9 @@ struct modifier {
 #define MOD_NULL  (1<<5)   /* throw away text for the vi cut buffer */
 #define MOD_CHAR  (1<<6)   /* force character-wise movement */
 #define MOD_LINE  (1<<7)   /* force line-wise movement */
+#define MOD_PRI   (1<<8)   /* OS primary selection for the vi cut buffer */
+#define MOD_CLIP  (1<<9)   /* OS clipboard for the vi cut buffer */
+#define MOD_OSSEL (MOD_PRI | MOD_CLIP)  /* either system selection */
 
 /* current modifier status */
 
@@ -316,7 +319,7 @@ struct vichange {
 
 typedef struct keymap *Keymap;
 
-typedef void (*KeyScanFunc) _((char *, Thingy, char *, void *));
+typedef void (*KeyScanFunc) (char *, Thingy, char *, void *);
 
 #define invicmdmode() (!strcmp(curkeymapname, "vicmd"))
 
@@ -430,8 +433,12 @@ enum {
  * and mark.
  */
 struct region_highlight {
-    /* Attributes turned on in the region */
+    /* Attributes for the region */
     zattr atr;
+    /* Explicitly set attributes for the region */
+    zattr atrmask;
+    /* Priority for this region relative to others that overlap */
+    int layer;
     /* Start of the region */
     int start;
     /* Start of the region in metafied ZLE line */
@@ -465,6 +472,32 @@ struct region_highlight {
  * interaction in Doc/Zsh/zle.yo. */
 #define N_SPECIAL_HIGHLIGHTS	(4)
 
+/* Terminal cursor contexts */
+enum cursorcontext {
+    CURC_EDIT,
+    CURC_COMMAND,
+    CURC_INSERT,
+    CURC_OVERWRITE,
+    CURC_PENDING,
+    CURC_REGION_START,
+    CURC_REGION_END,
+    CURC_VISUAL,
+    CURC_DEFAULT
+};
+
+#define CURF_DEFAULT 0
+#define CURF_UNDERLINE 1
+#define CURF_BAR 2
+#define CURF_BLOCK 3
+#define CURF_SHAPE_MASK 3
+#define CURF_BLINK (1 << 2)
+#define CURF_STEADY (1 << 3)
+#define CURF_HIDDEN (1 << 4)
+#define CURF_COLOR (1 << 5)
+#define CURF_COLOR_MASK ((0xffffffu << 8) | CURF_COLOR)
+#define CURF_RED_SHIFT   24
+#define CURF_GREEN_SHIFT 16
+#define CURF_BLUE_SHIFT  8
 
 #ifdef MULTIBYTE_SUPPORT
 /*
@@ -487,11 +520,7 @@ typedef struct {
      */
     REFRESH_CHAR chr;
     /*
-     * Its attributes.  'On' attributes (TXT_ATTR_ON_MASK) are
-     * applied before the character, 'off' attributes (TXT_ATTR_OFF_MASK)
-     * after it.  'On' attributes are present for all characters that
-     * need the effect; 'off' attributes are only present for the
-     * last character in the sequence.
+     * Its attributes.
      */
     zattr atr;
 } REFRESH_ELEMENT;
@@ -523,7 +552,7 @@ typedef REFRESH_ELEMENT *REFRESH_STRING;
     ((int)((unsigned)(x) - ZSH_INVALID_WCHAR_BASE))
 /* Turn a single byte character into a private wide character */
 #define ZSH_CHAR_TO_INVALID_WCHAR(x)			\
-    ((wchar_t)(STOUC(x) + ZSH_INVALID_WCHAR_BASE))
+    ((wchar_t)((unsigned char) x + ZSH_INVALID_WCHAR_BASE))
 #endif
 
 

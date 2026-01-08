@@ -280,7 +280,6 @@ case $OSTYPE in
       '-c+[show specified number of updates, then exit]:count'
       '-e[show only the number of errors on the interface]'
       '-q[only show interfaces that have seen packets]'
-      '-t[show current value of the watchdog timer function]'
     )
     statistics+=( $popt '-r[display routing statistics]' )
     groups+=( -n$nopt )
@@ -303,6 +302,9 @@ case $OSTYPE in
     memory+=( $Xopt) statistics+=( $Xopt )
     pcb+=( $Mopts $popt )
   ;;
+  freebsd<14->.*)
+    args+=( '-j+[run inside a jail]:jail:_jails' )
+  ;&
   freebsd<13->.*)
     sockets+=(
       '-c[show TCP stack used for each session]'

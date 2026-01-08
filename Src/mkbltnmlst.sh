@@ -76,6 +76,30 @@ for x_mod in $x_mods; do
     test "x$linked" = xno && echo "#endif"
 done
 
+# if dynamic module 'mod' with load=no has moddeps in its .mdd,
+# then output add_dep(mod, dep) for each 'dep' in moddeps.
+dyn_mods="`grep ' link=dynamic .* load=no ' $CFMOD | \
+          sed -e '/^#/d' -e 's/ .*/ /' -e 's/^name=/ /'`"
+
+for mod in $dyn_mods; do
+    modfile="`grep '^name='$mod' ' $CFMOD | \
+              sed -e 's/^.* modfile=//' -e 's/ .*//'`"
+    if test "x$modfile" = x; then
+	echo >&2 "WARNING: no name for \`$mod' in $CFMOD (ignored)"
+	continue
+    fi
+    unset moddeps
+    . $srcdir/../$modfile
+    if test -n "$moddeps"; then
+        echo '#ifdef DYNAMIC'
+        echo "/* non-linked-in known module \`$mod' */"
+        for dep in $moddeps; do
+          echo "  add_dep(\"$mod\", \"$dep\");"
+        done
+        echo '#endif'
+    fi
+done
+
 echo
 done_mods=" "
 for bin_mod in $bin_mods; do
@@ -98,12 +122,12 @@ for bin_mod in $bin_mods; do
 	esac
     done
     echo "    {"
-    echo "        extern int setup_${q_bin_mod} _((Module));"
-    echo "        extern int boot_${q_bin_mod} _((Module));"
-    echo "        extern int features_${q_bin_mod} _((Module,char***));"
-    echo "        extern int enables_${q_bin_mod} _((Module,int**));"
-    echo "        extern int cleanup_${q_bin_mod} _((Module));"
-    echo "        extern int finish_${q_bin_mod} _((Module));"
+    echo "        extern int setup_${q_bin_mod} (Module);"
+    echo "        extern int boot_${q_bin_mod} (Module);"
+    echo "        extern int features_${q_bin_mod} (Module,char***);"
+    echo "        extern int enables_${q_bin_mod} (Module,int**);"
+    echo "        extern int cleanup_${q_bin_mod} (Module);"
+    echo "        extern int finish_${q_bin_mod} (Module);"
     echo
     echo "        register_module(\"$bin_mod\","
     echo "                        setup_${q_bin_mod},"

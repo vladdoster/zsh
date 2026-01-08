@@ -352,6 +352,8 @@ getmathparam(struct mathvalue *mptr)
 	    }
 	    return zero_mnumber;
 	}
+	if (errflag)
+	    return zero_mnumber;
     }
     result = getnumvalue(mptr->pval);
     if (isset(FORCEFLOAT) && result.type == MN_INTEGER) {
@@ -641,7 +643,9 @@ zzlex(void)
 		return MINUSEQ;
 	    }
 	    if (unary) {
-		if (idigit(*ptr) || *ptr == '.') {
+		if (idigit(*ptr) ||
+		    (*ptr == '.' &&
+		     (idigit(ptr[1]) || !itype_end(ptr, INAMESPC, 0)))) {
 		    int ctype = lexconstant();
 		    if (ctype == NUM)
 		    {
@@ -835,7 +839,9 @@ zzlex(void)
 	case Dnull:
 	    break;
 	default:
-	    if (idigit(*--ptr) || *ptr == '.')
+	    if (idigit(*--ptr) ||
+		(*ptr == '.' &&
+		 (idigit(ptr[1]) || !itype_end(ptr, INAMESPC, 0))))
 		return lexconstant();
 	    if (*ptr == '#') {
 		if (*++ptr == '\\' || *ptr == '#') {
@@ -857,7 +863,7 @@ zzlex(void)
 		}
 		cct = 1;
 	    }
-	    if ((ie = itype_end(ptr, IIDENT, 0)) != ptr) {
+	    if ((ie = itype_end(ptr, INAMESPC, 0)) != ptr) {
 		int func = 0;
 		char *p;
 
@@ -955,7 +961,7 @@ getcvar(char *s)
 	    }
 	}
 #endif
-	mn.u.l = STOUC(*t == Meta ? t[1] ^ 32 : *t);
+	mn.u.l = (unsigned char) (*t == Meta ? t[1] ^ 32 : *t);
     }
     unqueue_signals();
     return mn;
@@ -1363,8 +1369,11 @@ op(int what)
     }
 
     spval = &stack[sp].val;
-    if (stack[sp].val.type == MN_UNSET)
+    if (stack[sp].val.type == MN_UNSET) {
 	*spval = getmathparam(stack + sp);
+	if (errflag)
+	    return;
+    }
     switch (what) {
     case NOT:
 	if (spval->type & MN_FLOAT) {
@@ -1548,21 +1557,32 @@ checkunary(int mtokc, char *mptr)
 	    errmsg = 2;
     }
     if (errmsg) {
-	int len, over = 0;
+	int len = 0, over = 0;
 	char *errtype = errmsg == 2 ? "operator" : "operand";
 	while (inblank(*mptr))
 	    mptr++;
-	len = ztrlen(mptr);
-	if (len > 10) {
-	    len = 10;
-	    over = 1;
+	if (isset(MULTIBYTE))
+	    MB_CHARINIT();
+	while (over < 10 && mptr[len]) {
+	    if (isset(MULTIBYTE))
+		len += MB_METACHARLEN(mptr+len);
+	    else
+		len += (mptr[len] == Meta ? 2 : 1);
+	    ++over;
+	}
+	if ((over = mptr[len])) {
+	    mptr = dupstring(mptr);
+	    if (mptr[len] == Meta)
+		mptr[len+1] = 0;
+	    else
+		mptr[len] = 0;
 	}
 	if (!*mptr)
 	    zerr("bad math expression: %s expected at end of string",
 		errtype);
 	else
-	    zerr("bad math expression: %s expected at `%l%s'",
-		 errtype, mptr, len, over ? "..." : "");
+	    zerr("bad math expression: %s expected at `%s%s'",
+		 errtype, mptr, over ? "..." : "");
     }
     unary = !(tp & OP_OPF);
 }

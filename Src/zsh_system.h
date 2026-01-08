@@ -82,12 +82,6 @@
  */
 #define _STRPTIME_DONTZERO
 
-#ifdef PROTOTYPES
-# define _(Args) Args
-#else
-# define _(Args) ()
-#endif
-
 #ifndef HAVE_ALLOCA
 # define alloca zhalloc
 #else
@@ -101,7 +95,7 @@
  #   pragma alloca
 #   else
 #    ifndef alloca
-char *alloca _((size_t));
+char *alloca (size_t);
 #    endif
 #   endif
 #  endif
@@ -375,8 +369,6 @@ struct timespec {
 # ifndef TIME_H_SELECT_H_CONFLICTS
 #  include <sys/select.h>
 # endif
-#elif defined(SELECT_IN_SYS_SOCKET_H)
-# include <sys/socket.h>
 #endif
 
 #if defined(__APPLE__) && defined(HAVE_SELECT)
@@ -783,7 +775,8 @@ extern char **environ;
  * We always need setenv and unsetenv in pairs, because
  * we don't know how to do memory management on the values set.
  */
-#if defined(HAVE_SETENV) && defined(HAVE_UNSETENV) && !defined(__APPLE__)
+#if defined(HAVE_SETENV) && defined(HAVE_UNSETENV) \
+    && !defined(SETENV_MANGLES_EQUAL)
 # define USE_SET_UNSET_ENV
 #endif
 
@@ -807,16 +800,6 @@ extern short ospeed;
 #define ftell ftello
 #endif
 #endif
-
-/* Can't support job control without working tcsetgrp() */
-#ifdef BROKEN_TCSETPGRP
-#undef JOB_CONTROL
-#endif /* BROKEN_TCSETPGRP */
-
-#ifdef BROKEN_KILL_ESRCH
-#undef ESRCH
-#define ESRCH EINVAL
-#endif /* BROKEN_KILL_ESRCH */
 
 /* Can we do locale stuff? */
 #undef USE_LOCALE

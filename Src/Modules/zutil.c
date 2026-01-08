@@ -462,6 +462,28 @@ lookupstyle(char *ctxt, char *style)
 }
 
 static int
+testforstyle(char *ctxt, char *style)
+{
+    Style s;
+    Stypat p;
+    int found = 0;
+
+    s = (Style)zstyletab->getnode2(zstyletab, style);
+    if (s) {
+	MatchData match;
+	savematch(&match);
+	for (p = s->pats; p; p = p->next)
+	    if (pattry(p->prog, ctxt)) {
+		found = 1;
+		break;
+	    }
+	restorematch(&match);
+    }
+
+    return !found;	/* 0 == success */
+}
+
+static int
 bin_zstyle(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 {
     int min, max, n, add = 0, list = ZSLIST_NONE, eval = 0;
@@ -570,6 +592,7 @@ bin_zstyle(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
     case 't': min = 2; max = -1; break;
     case 'T': min = 2; max = -1; break;
     case 'm': min = 3; max =  3; break;
+    case 'q': min = 2; max =  2; break;
     case 'g': min = 1; max =  3; break;
     default:
 	zwarnnam(nam, "invalid option: %s", args[0]);
@@ -723,6 +746,15 @@ bin_zstyle(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 	    return 1;
 	}
 	break;
+    case 'q':
+	{
+	    int success;
+	    queue_signals();	/* Protect PAT_STATIC */
+	    success = testforstyle(args[1], args[2]);
+	    unqueue_signals();
+	    return success;
+	}
+	break;
     case 'g':
 	{
 	    int ret = 1;
@@ -795,11 +827,11 @@ static char *zformat_substring(char* instr, char **specs, char **outp,
 
 	    if (idigit(*s)) {
 		for (min = 0; idigit(*s); s++)
-		    min = (min * 10) + (int) STOUC(*s) - '0';
+		    min = (min * 10) + (int) (unsigned char) *s - '0';
 	    }
 
 	    /* Ternary expressions */
-	    testit = (STOUC(*s) == '(');
+	    testit = ((unsigned char) *s == '(');
 	    if (testit && s[1] == '-')
 	    {
 		/* Allow %(-1... etc. */
@@ -808,25 +840,25 @@ static char *zformat_substring(char* instr, char **specs, char **outp,
 	    }
 	    if ((*s == '.' || testit) && idigit(s[1])) {
 		for (max = 0, s++; idigit(*s); s++)
-		    max = (max * 10) + (int) STOUC(*s) - '0';
+		    max = (max * 10) + (int) (unsigned char) *s - '0';
 	    } else if (*s == '.' || testit)
 		s++;
 
-	    if (testit && STOUC(*s)) {
+	    if (testit && (unsigned char) *s) {
 		int actval, testval, endcharl;
 
 		/* Only one number is useful for ternary expressions. */
 		testval = (min >= 0) ? min : (max >= 0) ? max : 0;
 
-		if (specs[STOUC(*s)] && *specs[STOUC(*s)]) {
+		if (specs[(unsigned char) *s] && *specs[(unsigned char) *s]) {
 		    if (presence) {
 			if (testval)
 #ifdef MULTIBYTE_SUPPORT
 			    if (isset(MULTIBYTE))
-				actval = MB_METASTRWIDTH(specs[STOUC(*s)]);
+				actval = MB_METASTRWIDTH(specs[(unsigned char) *s]);
 			    else
 #endif
-				actval = strlen(specs[STOUC(*s)]);
+				actval = strlen(specs[(unsigned char) *s]);
 		        else
 			    actval = 1;
 			actval = right ? (testval < actval) : (testval >= actval);
@@ -834,7 +866,7 @@ static char *zformat_substring(char* instr, char **specs, char **outp,
 			if (right) /* put the sign back */
 			    testval *= -1;
 			/* zero means values are equal, i.e. true */
-			actval = (int)mathevali(specs[STOUC(*s)]) - testval;
+			actval = (int) mathevali(specs[(unsigned char) *s]) - testval;
 		    }
 		} else
 		    actval = presence ? !right : testval;
@@ -855,7 +887,7 @@ static char *zformat_substring(char* instr, char **specs, char **outp,
 		    return NULL;
 	    } else if (skip) {
 		continue;
-	    } else if ((spec = specs[STOUC(*s)])) {
+	    } else if ((spec = specs[(unsigned char) *s])) {
 		int len;
 
 		if ((len = strlen(spec)) > max && max >= 0)
@@ -950,7 +982,7 @@ bin_zformat(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 		    zwarnnam(nam, "invalid argument: %s", *ap);
 		    return 1;
 		}
-		specs[STOUC(ap[0][0])] = ap[0] + 2;
+		specs[(unsigned char) ap[0][0]] = ap[0] + 2;
 	    }
 	    out = (char *) zhalloc(olen = 128);
 
@@ -965,7 +997,7 @@ bin_zformat(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
     case 'a':
 	{
 	    char **ap, *cp;
-	    int nbc = 0, colon = 0, pre = 0, suf = 0;
+	    int nbc = 0, pre = 0, suf = 0;
 #ifdef MULTIBYTE_SUPPORT
 	    int prechars = 0;
 #endif /* MULTIBYTE_SUPPORT */
@@ -980,7 +1012,6 @@ bin_zformat(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 		    int dchars = 0;
 #endif /* MULTIBYTE_SUPPORT */
 
-		    colon++;
 		    if ((d = cp - *ap - nbc) > pre)
 			pre = d;
 #ifdef MULTIBYTE_SUPPORT
@@ -1378,11 +1409,11 @@ rmatch(RParseResult *sm, char *subj, char *var1, char *var2, int comp)
 					     "zregexparse-guard"), !lastval))) {
 		LinkNode aln;
 		char **mend;
-		int len;
+		int len = 0;
 
 		queue_signals();
-		mend = getaparam("mend");
-		len = atoi(mend[0]);
+		if ((mend = getaparam("mend")))
+		    len = atoi(mend[0]);
 		unqueue_signals();
 
 		for (i = len; i; i--)
@@ -1497,12 +1528,14 @@ struct zoptdesc {
     Zoptval vals, last;
 };
 
-#define ZOF_ARG  1
-#define ZOF_OPT  2
-#define ZOF_MULT 4
-#define ZOF_SAME 8
-#define ZOF_MAP 16
-#define ZOF_CYC 32
+#define ZOF_ARG    1
+#define ZOF_OPT    2
+#define ZOF_MULT   4
+#define ZOF_SAME   8
+#define ZOF_MAP   16
+#define ZOF_CYC   32
+#define ZOF_GNUS  64
+#define ZOF_GNUL 128
 
 struct zoptarr {
     Zoptarr next;
@@ -1537,9 +1570,29 @@ static Zoptdesc
 lookup_opt(char *str)
 {
     Zoptdesc p;
-
     for (p = opt_descs; p; p = p->next) {
-	if ((p->flags & ZOF_ARG) ? strpfx(p->name, str) : !strcmp(p->name, str))
+	/*
+	 * Option takes argument, with GNU-style handling of =. This should only
+	 * be set for long options, though we don't care about that here. Unlike
+	 * the default behaviour, matching is unambiguous
+	 */
+	if (p->flags & ZOF_GNUL) {
+	    if (!strcmp(p->name, str) || /* Inefficient, whatever */
+		    (strpfx(p->name, str) && str[strlen(p->name)] == '='))
+		return p;
+	/*
+	 * Option takes argument, default 'cuddled' style. This is weird with
+	 * long options because we naively accept whatever option has a prefix
+	 * match for the given parameter. Thus if you have specs `-foo:` and
+	 * `-foobar:` (or even `-foobar` with no optarg), without the GNU
+	 * setting, the behaviour depends on the order in which they were
+	 * defined. It is documented to work this way though
+	 */
+	} else if (p->flags & ZOF_ARG) {
+	    if (strpfx(p->name, str))
+		return p;
+	/* Option takes no argument */
+	} else if (!strcmp(p->name, str))
 	    return p;
     }
     return NULL;
@@ -1609,12 +1662,15 @@ add_opt_val(Zoptdesc d, char *arg)
 	v->str = NULL;
 	if (d->arr)
 	    d->arr->num += (arg ? 2 : 1);
-    } else if (arg) {
-	char *s = (char *) zhalloc(strlen(d->name) + strlen(arg) + 2);
+    } else if (arg || d->flags & ZOF_GNUL) {
+	/* 3 here is '-' + '=' + NUL */
+	char *s = (char *) zhalloc(strlen(d->name) + strlen(arg ? arg : "") + 3);
 
 	*s = '-';
 	strcpy(s + 1, d->name);
-	strcat(s, arg);
+	if (d->flags & ZOF_GNUL)
+	    strcat(s, "=");
+	strcat(s, arg ? arg : "");
 	v->str = s;
 	if (d->arr)
 	    d->arr->num += 1;
@@ -1660,7 +1716,7 @@ zalloc_default_array(char ***aval, char *assoc, int keep, int num)
 	struct value vbuf;
 	Value v = fetchvalue(&vbuf, &assoc, 0,
 			     SCANPM_WANTKEYS|SCANPM_WANTVALS|SCANPM_MATCHMANY);
-	if (v && v->isarr) {
+	if (v && v->scanflags) {
 	    char **dp, **dval = getarrvalue(v);
 	    int dnum = (dval ? arrlen(dval) : 0) + 1;
 	    *aval = (char **) zalloc(((num * 2) + dnum) * sizeof(char *));
@@ -1682,7 +1738,8 @@ static int
 bin_zparseopts(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 {
     char *o, *p, *n, **pp, **aval, **ap, *assoc = NULL, **cp, **np;
-    int del = 0, flags = 0, extract = 0, fail = 0, keep = 0;
+    char *paramsname = NULL, **params;
+    int del = 0, flags = 0, extract = 0, fail = 0, gnu = 0, keep = 0;
     Zoptdesc sopts[256], d;
     Zoptarr a, defarr = NULL;
     Zoptval v;
@@ -1726,6 +1783,14 @@ bin_zparseopts(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 		    break;
 		}
 		fail = 1;
+		break;
+	    case 'G':
+		if (o[2]) {
+		    args--;
+		    o = NULL;
+		    break;
+		}
+		gnu = 1;
 		break;
 	    case 'K':
 		if (o[2]) {
@@ -1777,6 +1842,20 @@ bin_zparseopts(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 		    return 1;
 		}
 		break;
+	    case 'v':
+		if (paramsname) {
+		    zwarnnam(nam, "argv array given more than once");
+		    return 1;
+		}
+		if (o[2])
+		    paramsname = o + 2;
+		else if (*args)
+		    paramsname = *args++;
+		else {
+		    zwarnnam(nam, "missing array name");
+		    return 1;
+		}
+		break;
 	    default:
 		/* Anything else is an option description */
 		args--;
@@ -1818,6 +1897,9 @@ bin_zparseopts(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 	if (*p == ':') {
 	    f |= ZOF_ARG;
 	    *p = '\0';
+	    if (gnu) {
+		f |= o[1] ? ZOF_GNUL : ZOF_GNUS;
+	    }
 	    if (*++p == ':') {
 		p++;
 		f |= ZOF_OPT;
@@ -1864,15 +1946,21 @@ bin_zparseopts(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 	d->vals = d->last = NULL;
 	opt_descs = d;
 	if (!o[1])
-	    sopts[STOUC(*o)] = d;
+	    sopts[(unsigned char) *o] = d;
 	if ((flags & ZOF_MAP) && !map_opt_desc(d)) {
 	    zwarnnam(nam, "cyclic option mapping: %s", args[-1]);
 	    return 1;
 	}
     }
-    np = cp = pp = ((extract && del) ? arrdup(pparams) : pparams);
+    params = getaparam((paramsname = paramsname ? paramsname : "argv"));
+    if (!params) {
+	zwarnnam(nam, "no such array: %s", paramsname);
+	return 1;
+    }
+    np = cp = pp = ((extract && del) ? arrdup(params) : params);
     for (; (o = *pp); pp++) {
-	if (*o != '-') {
+	/* Not an option. With GNU style, this includes '-' */
+	if (*o != '-' || (gnu && !o[1])) {
 	    if (extract) {
 		if (del)
 		    *cp++ = o;
@@ -1880,6 +1968,7 @@ bin_zparseopts(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 	    } else
 		break;
 	}
+	/* '--' or (with non-GNU style, see above) '-', end parsing */
 	if (!o[1] || (o[1] == '-' && !o[2])) {
 	    if (del && extract)
 		*cp++ = o;
@@ -1887,8 +1976,9 @@ bin_zparseopts(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 	    break;
 	}
 	if (!(d = lookup_opt(o + 1))) {
+	    /* No match for whole param, try each character as a short option */
 	    while (*++o) {
-		if (!(d = sopts[STOUC(*o)])) {
+		if (!(d = sopts[(unsigned char) *o])) {
 		    if (fail) {
 			if (*o != '-')
 			    zwarnnam(nam, "bad option: -%c", *o);
@@ -1900,19 +1990,27 @@ bin_zparseopts(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 		    break;
 		}
 		if (d->flags & ZOF_ARG) {
+		    /* Optarg in same parameter */
 		    if (o[1]) {
 			add_opt_val(d, o + 1);
 			break;
+		    /*
+		     * Mandatory optarg or (if not GNU style) optional optarg in
+		     * next parameter
+		     */
 		    } else if (!(d->flags & ZOF_OPT) ||
-			       (pp[1] && pp[1][0] != '-')) {
+			       (!(d->flags & (ZOF_GNUL | ZOF_GNUS)) &&
+			        pp[1] && pp[1][0] != '-')) {
 			if (!pp[1]) {
 			    zwarnnam(nam, "missing argument for option: -%s",
 				    d->name);
 			    return 1;
 			}
 			add_opt_val(d, *++pp);
+		    /* Missing optional optarg */
 		    } else
 			add_opt_val(d, NULL);
+		/* No optarg required */
 		} else
 		    add_opt_val(d, NULL);
 	    }
@@ -1925,21 +2023,37 @@ bin_zparseopts(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
 		    break;
 	    }
 	} else {
+	    /* Whole param matches a defined option */
 	    if (d->flags & ZOF_ARG) {
 		char *e = o + strlen(d->name) + 1;
 
-		if (*e)
+		/* GNU style allows an empty optarg in the same parameter */
+		if ((d->flags & ZOF_GNUL) && *e == '=') {
+		    add_opt_val(d, ++e);
+		/*
+		 * Non-empty optarg in same parameter. lookup_opt() test ensures
+		 * that this won't be a GNU-style long option, where this would
+		 * be invalid
+		 */
+		} else if (*e) {
 		    add_opt_val(d, e);
-		else if (!(d->flags & ZOF_OPT) ||
-			 (pp[1] && pp[1][0] != '-')) {
+		/*
+		 * Mandatory optarg or (if not GNU style) optional optarg in
+		 * next parameter
+		 */
+		} else if (!(d->flags & ZOF_OPT) ||
+			 (!(d->flags & (ZOF_GNUL | ZOF_GNUS)) &&
+			  pp[1] && pp[1][0] != '-')) {
 		    if (!pp[1]) {
 			zwarnnam(nam, "missing argument for option: -%s",
 				d->name);
 			return 1;
 		    }
 		    add_opt_val(d, *++pp);
+		/* Missing optional optarg */
 		} else
 		    add_opt_val(d, NULL);
+	    /* No optarg required */
 	    } else
 		add_opt_val(d, NULL);
 	}
@@ -2010,12 +2124,9 @@ bin_zparseopts(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
     if (del) {
 	if (extract) {
 	    *cp = NULL;
-	    freearray(pparams);
-	    pparams = zarrdup(np);
+	    setaparam(paramsname, zarrdup(np));
 	} else {
-	    pp = zarrdup(pp);
-	    freearray(pparams);
-	    pparams = pp;
+	    setaparam(paramsname, zarrdup(pp));
 	}
     }
     return 0;

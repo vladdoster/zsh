@@ -13,17 +13,18 @@ cindex(private parameter, creating)
 item(tt(private) [ {tt(PLUS())|tt(-)}tt(AHUahlmrtux) ] \
 [ {tt(PLUS())|tt(-)}tt(EFLRZi) [ var(n) ] ] [ var(name)[tt(=)var(value)] ... ])(
 The tt(private) builtin accepts all the same options and arguments as tt(local)
-(ifzman(zmanref(zshbuiltins))ifnzman(noderef(Shell Builtin Commands))) except
+(nmref(Shell Builtin Commands)(zshbuiltins)) except
 for the `tt(-)tt(T)' option.  Tied parameters may not be made private.
 
-The `tt(-)tt(p)' option is presently a no-op because the state of
-private parameters cannot reliably be reloaded.  This also applies
-to printing private parameters with `tt(typeset -p)'.
+The `tt(-)tt(p)' option is presently disabled because the state of
+private parameters cannot reliably be reloaded.  When `tt(typeset -)tt(p)'
+outputs a private parameter, it is treated as a local with the
+`tt(-)tt(h)' (hide) option enabled.
 
 If used at the top level (outside a function scope), tt(private) creates a
 normal parameter in the same manner as tt(declare) or tt(typeset).  A
 warning about this is printed if tt(WARN_CREATE_GLOBAL) is set
-(ifzman(zmanref(zshoptions))ifnzman(noderef(Options))).  Used inside a
+(nmref(Options)(zshoptions)). Used inside a
 function scope, tt(private) creates a local parameter similar to one
 declared with tt(local), except having special properties noted below.
 
@@ -84,10 +85,18 @@ created outside the local scope when it was not previously declared.)
 itemiz(An exported private remains in the environment of inner scopes but
 appears unset for the current shell in those scopes.  Generally, exporting
 private parameters should be avoided.)
+itemiz(Current shell command substitutions such as `tt(${|)...tt(})',
+`tt(${|)var(var)tt(|)...tt(})' and `tt(${ )...tt( })' may read and assign
+private parameters from the enclosing function.)
+itemiz(Declaring a private parameter in a current shell command substitution
+limits that parameter to the scope of the command substitution, just as if
+the parameter were declared in a function.  This also prevents access by
+any enclosed current shell command substitutions, but other substitutions
+may use the private parameter because those have the same calling scope.)
 enditemize()
 
 Note that this differs from the static scope defined by compiled languages
-derived from C, in that the a new call to the same function creates a new
+derived from C, in that a new call to the same function creates a new
 scope, i.e., the parameter is still associated with the call stack rather
 than with the function definition.  It differs from ksh `tt(typeset -S)'
 because the syntax used to define the function has no bearing on whether

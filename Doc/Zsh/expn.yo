@@ -11,10 +11,7 @@ This is performed only in interactive shells.
 )
 item(em(Alias Expansion))(
 Aliases are expanded immediately before the command line is parsed as
-explained
-ifzman(under Aliasing in zmanref(zshmisc))\
-ifnzman(in noderef(Aliasing))\
-.
+explained in sectref(Aliasing)(zshmisc).
 )
 xitem(em(Process Substitution))
 xitem(em(Parameter Expansion))
@@ -68,9 +65,9 @@ most recent command is always retained in any case.  Each saved command in
 the history list is called a history em(event) and is assigned a number,
 beginning with 1 (one) when the shell starts up.  The history number that
 you may see in your prompt (see
-ifzman(EXPANSION OF PROMPT SEQUENCES in zmanref(zshmisc))\
-ifnzman(noderef(Prompt Expansion))\
-) is the number that is to be assigned to the em(next) command.
+tt(%h) or tt(%!) prompt escape described in
+sectref(Simple Prompt Escapes)(zshmisc))
+is the number that is to be assigned to the em(next) command.
 
 startmenu()
 menu(Overview)
@@ -87,8 +84,9 @@ command line, including inside double quotes (but not inside single quotes
 tt('...') or C-style quotes tt($'...') nor when escaped with a backslash).
 
 The first character is followed by an optional event designator
-(ifzman(see )noderef(Event Designators)) and then an optional word
-designator (noderef(Word Designators)); if neither of these designators is
+(see subref(Event Designators)(below))
+and then an optional word designator (subref(Word Designators)(below));
+if neither of these designators is
 present, no history expansion occurs.
 
 Input lines containing history expansions are echoed after being expanded,
@@ -122,16 +120,14 @@ actually the second character of the tt(histchars) parameter)
 repeats the last command, replacing the string var(foo) with var(bar).
 More precisely, the sequence `tt(^)var(foo)tt(^)var(bar)tt(^)' is
 synonymous with `tt(!!:s)tt(^)var(foo)tt(^)var(bar)tt(^)', hence other
-modifiers (see noderef(Modifiers)) may follow the final `tt(^)'.
+modifiers (see subref(Modifiers)(below)) may follow the final `tt(^)'.
 In particular, `tt(^)var(foo)tt(^)var(bar)tt(^:G)' performs a global
 substitution.
 
 If the shell encounters the character sequence `tt(!")'
 in the input, the history mechanism is temporarily disabled until
-the current list (see
-ifzman(zmanref(zshmisc))\
-ifnzman(noderef(Shell Grammar))\
-) is fully parsed.  The `tt(!")' is removed from the input, and any
+the current list (see nmref(Shell Grammar)(zshmisc))
+is fully parsed.  The `tt(!")' is removed from the input, and any
 subsequent `tt(!)' characters have no special significance.
 
 findex(fc, use of)
@@ -150,8 +146,8 @@ startitem()
 item(tt(!))(
 Start a history expansion, except when followed by a blank, newline,
 `tt(=)' or `tt(LPAR())'.  If followed immediately by a word designator
-(ifzman(see )noderef(Word Designators)), this forms a history reference
-with no event designator (ifzman(see )noderef(Overview)).
+(ifzman(see )subref(Word Designators)(below)), this forms a history reference
+with no event designator (ifzman(see )subref(Overview)(above)).
 )
 item(tt(!!))(
 Refer to the previous command.
@@ -312,7 +308,8 @@ zero) that are neither `tt(.)' nor `tt(/)' and that continue to the end
 of the string.  For example, the extension of
 `tt(foo.orig.c)' is `tt(.c)', and `tt(dir.c/foo)' has no extension.
 )
-item(tt(s/)var(l)tt(/)var(r)[tt(/)])(
+xitem(tt(s/)var(l)tt(/)var(r)[tt(/)])
+item(tt(S/)var(l)tt(/)var(r)[tt(/)])(
 Substitute var(r) for var(l) as described below.
 The substitution is done only for the
 first string that matches var(l).  For arrays and for filename
@@ -324,13 +321,17 @@ perform global substitution, i.e. substitute every occurrence of var(r)
 for var(l).  Note that the tt(g) or tt(:G) must appear in exactly the
 position shown.
 
+The use of tt(S) instead of tt(s) is identical except that
+the source is treated as a pattern, just as if the option
+tt(HIST_SUBST_PATTERN) were set.
+
 See further notes on this form of substitution below.
 )
 item(tt(&))(
-Repeat the previous tt(s) substitution.  Like tt(s), may be preceded
-immediately by a tt(g).  In parameter expansion the tt(&) must appear
-inside braces, and in filename generation it must be quoted with a
-backslash.
+Repeat the previous tt(s) or tt(S) substitution, whichever was most
+recent.  Like tt(s) and tt(S), may be preceded immediately by a tt(g).
+In parameter expansion the tt(&) must appear inside braces, and in
+filename generation it must be quoted with a backslash.
 )
 item(tt(t) [ var(digits) ])(
 Remove all leading pathname components, leaving the final component (tail).
@@ -377,10 +378,10 @@ substitutions or expansions are performed once at the time the qualifier
 is parsed, even before the `tt(:s)' expression itself is divided into
 var(l) and var(r) sides.
 
-If the option tt(HIST_SUBST_PATTERN) is set, var(l) is treated as
-a pattern of the usual form described in
-ifzman(the section FILENAME GENERATION below)\
-ifnzman(noderef(Filename Generation)).  This can be used in
+If the option tt(HIST_SUBST_PATTERN) is set or the original substitution
+was started with a capital tt(S), var(l) is treated as
+a pattern of the usual form described in sectref(Filename Generation)(below).
+This can be used in
 all the places where modifiers are available; note, however, that
 in globbing qualifiers parameter substitution has already taken place,
 so parameters in the replacement string should be quoted to ensure
@@ -521,9 +522,8 @@ There is an additional problem with tt(>LPAR())var(process)tt(RPAR()); when
 this is attached to an external command, the parent shell does not wait
 for var(process) to finish and hence an immediately following command
 cannot rely on the results being complete.  The problem and solution are
-the same as described in the section em(MULTIOS) in
-ifzman(zmanref(zshmisc))\
-ifnzman(noderef(Redirection)).  Hence in a simplified
+the same as described in the section sectref(Multios)(zshmisc).
+Hence in a simplified
 version of the example above:
 
 example(tt(paste <LPAR()cut -f1) var(file1)tt(RPAR() <LPAR()cut -f3) var(file2)tt(RPAR()) tt(> >LPAR())var(process)tt(RPAR()))
@@ -571,13 +571,7 @@ sect(Parameter Expansion)
 cindex(parameter expansion)
 cindex(expansion, parameter)
 The character `tt($)' is used to introduce parameter expansions.
-See
-ifzman(\
-zmanref(zshparam)
-)\
-ifnzman(\
-noderef(Parameters)
-)\
+See nmref(Parameters)(zshparam)
 for a description of parameters, including arrays, associative arrays,
 and subscript notation to access individual array elements.
 
@@ -604,18 +598,29 @@ and other operators, such as `tt(${PREFIX:-"/usr/local"})'.  Parameter
 expansions can also be nested.  These topics will be introduced below.
 The full rules are complicated and are noted at the end.
 
+cindex(namespace)
+Parameter expansions may optionally include a em(namespace) prefix in
+the format `tt(.)var(identifier)tt(.)' This currently has no special
+meaning to the shell, but provides a convenient means of grouping
+related parameters.  Expansions using a namespace em(must) include
+braces (tt({) and tt(})) as shown in the descriptions below, and
+only one namespace prefix is allowed.
+
 In the expansions discussed below that require a pattern, the form of
 the pattern is the same as that used for filename generation;
-see noderef(Filename Generation).  Note that these patterns, along with
+see sectref(Filename Generation)(below).  Note that these patterns, along with
 the replacement text of any substitutions, are themselves subject to
 parameter expansion, command substitution, and arithmetic expansion.
+
 In addition to the following operations, the colon modifiers described in
-noderef(Modifiers) in noderef(History Expansion) can be
+subref(Modifiers)() in sectref(History Expansion)(above) can be
 applied:  for example, tt(${i:s/foo/bar/}) performs string
 substitution on the expansion of parameter tt($i).
 
 In the following descriptions, `var(word)' refers to a single word
 substituted on the command line, not necessarily a space delimited word.
+The reference to `var(name)' in each description presumes any optional
+namespace prefix.
 
 startitem()
 item(tt(${)var(name)tt(}))(
@@ -665,7 +670,9 @@ item(tt(${)var(name)tt(:?)var(word)tt(}))(
 In the first form, if var(name) is set, or in the second form if var(name)
 is both set and non-null, then substitute its value; otherwise, print
 var(word) and exit from the shell.  Interactive shells instead return to
-the prompt.  If var(word) is omitted, then a standard message is printed.
+the prompt.  If var(word) is omitted, then a standard message is
+printed.  Note that var(word) is expanded even though its value
+is not substituted onto the command line.
 )
 enditem()
 
@@ -943,8 +950,7 @@ deleted.  The form with tt($LPAR())...tt(RPAR()) is often useful in
 combination with the flags described next; see the examples below.
 Each var(name) or nested tt(${)...tt(}) in a parameter expansion may
 also be followed by a subscript expression as described in
-ifzman(em(Array Parameters) in zmanref(zshparam))\
-ifnzman(noderef(Array Parameters)).
+sectref(Array Parameters)(zshparam).
 
 Note that double quotes may appear around nested expressions, in which
 case only the part inside is treated as quoted; for example,
@@ -955,6 +961,7 @@ tt("${(@f)"$(foo)"}"), there are two sets of quotes, one surrounding the
 whole expression, the other (redundant) surrounding the tt($(foo)) as
 before.
 
+anchor(Parameter Expansion Flags)
 subsect(Parameter Expansion Flags)
 cindex(parameter expansion flags)
 cindex(flags, parameter expansion)
@@ -967,6 +974,11 @@ means the same thing as the more readable `(tt(%%qqq))'.  The
 following flags are supported:
 
 startitem()
+item(tt(!))(
+When the parameter being expanded is a named reference, the reference
+itself is examined and thus is em(not) resolved to its referent.  In
+ksh emulation, the parens around this flag are optional.
+)
 item(tt(#))(
 Evaluate the resulting words as numeric expressions and interpret
 these as character codes.  Output the corresponding characters.  Note
@@ -979,8 +991,7 @@ If the tt(MULTIBYTE) option is set and the number is greater than 127
 item(tt(%))(
 Expand all tt(%) escapes in the resulting words in the same way as in
 prompts (see
-ifzman(EXPANSION OF PROMPT SEQUENCES in zmanref(zshmisc))\
-ifnzman(noderef(Prompt Expansion))). If this flag is given twice,
+sectref(Expansion of Prompt Sequences)(zshmisc)). If this flag is given twice,
 full prompt expansion is done on the resulting words, depending on the
 setting of the tt(PROMPT_PERCENT), tt(PROMPT_SUBST) and tt(PROMPT_BANG)
 options.
@@ -1055,8 +1066,7 @@ to substitute the leading part of these by names.  The remainder of
 the path (the whole of it if the leading part was not substituted)
 is then quoted so that the whole string can be used as a shell
 argument.  This is the reverse of `tt(~)' substitution:  see
-ifnzman(noderef(Filename Expansion))\
-ifzman(the section FILENAME EXPANSION below).
+sectref(Filename Expansion)(below).
 )
 item(tt(e))(
 Perform single word shell expansions, namely em(parameter expansion),
@@ -1093,7 +1103,7 @@ tt(KSH_ARRAYS) option a subscript `tt([*])' or `tt([@])' is needed
 to operate on the whole array, as usual.
 )
 item(tt(L))(
-Convert all letters in the result to lower case.
+Convert all letters in the result to lower case, like `tt(typeset -l)'.
 )
 item(tt(n))(
 Sort decimal integers numerically; if the first differing
@@ -1177,34 +1187,35 @@ of the parameter would usually appear. This string consists of keywords
 separated by hyphens (`tt(-)'). The first keyword in the string describes
 the main type, it can be one of `tt(scalar)', `tt(array)', `tt(integer)',
 `tt(float)' or `tt(association)'. The other keywords describe the type in
-more detail:
+more detail, in most cases corresponding to options of the `tt(typeset)'
+command:
 
 startitem()
 item(tt(local))(
 for local parameters
 )
 item(tt(left))(
-for left justified parameters
+for left justified parameters (tt(-L))
 )
 item(tt(right_blanks))(
-for right justified parameters with leading blanks
+for right justified parameters with leading blanks (tt(-R))
 )
 item(tt(right_zeros))(
-for right justified parameters with leading zeros
+for right justified parameters with leading zeros (tt(-Z))
 )
 item(tt(lower))(
 for parameters whose value is converted to all lower case when it is
-expanded
+expanded (tt(-l))
 )
 item(tt(upper))(
 for parameters whose value is converted to all upper case when it is
-expanded
+expanded (tt(-u))
 )
 item(tt(readonly))(
-for readonly parameters
+for readonly parameters (tt(-r))
 )
 item(tt(tag))(
-for tagged parameters
+for tagged parameters (tt(-t))
 )
 item(tt(tied))(
 for parameters tied to another parameter in the manner of tt(PATH)
@@ -1212,16 +1223,20 @@ for parameters tied to another parameter in the manner of tt(PATH)
 special parameters or user-defined with `tt(typeset -T)'
 )
 item(tt(export))(
-for exported parameters
+for exported parameters (tt(-x) or `tt(export)')
 )
 item(tt(unique))(
-for arrays which keep only the first occurrence of duplicated values
+for arrays which keep only the first occurrence of duplicated values (tt(-U))
 )
 item(tt(hide))(
-for parameters with the `hide' flag
+for parameters with the `hide' flag (tt(-h))
 )
 item(tt(hideval))(
-for parameters with the `hideval' flag
+for parameters with the `hideval' flag (tt(-H))
+)
+item(tt(nameref))(
+for named references (tt(typeset -n)) either having an empty value or
+when combined with `tt(!)' as in `tt(${LPAR()!t)tt(RPAR()var(rname)})'
 )
 item(tt(special))(
 for special parameters defined by the shell
@@ -1229,10 +1244,10 @@ for special parameters defined by the shell
 enditem()
 )
 item(tt(u))(
-Expand only the first occurrence of each unique word.
+Expand only the first occurrence of each unique word, like `tt(typeset -U)'.
 )
 item(tt(U))(
-Convert all letters in the result to upper case.
+Convert all letters in the result to upper case, like `tt(typeset -u)'.
 )
 item(tt(v))(
 Used with tt(k), substitute (as two consecutive words) both the key
@@ -1520,6 +1535,117 @@ Include the unmatched portion in the result (the em(R)est).
 )
 enditem()
 
+subsect(Named References)
+cindex(named references)
+cindex(namerefs)
+cindex(reference variables)
+cindex(parameters, nameref)
+The command
+ifzman()
+indent(tt(typeset -n )var(pname)tt(=)var(rname))
+
+initializes a parameter var(pname) as a reference to a second
+parameter var(rname).  The var(rname) may also be omitted, in which
+case var(pname) is a placeholder which, the first time it is assigned,
+is initialized to an active reference to the assigned var(rname). See
+sectref(Named References)(zshparam)ifnzman( under noderef(Parameters))
+for more about placeholders.
+
+With the few exceptions described here, when
+var(pname) is used in any of the expansion forms described above, the
+parameter var(rname) is expanded instead.  This is similar to the
+action of the `tt((P))' expansion flag, but when var(rname) has itself
+been declared a named reference, that third parameter referenced by
+var(pname) is also expanded, and so on.  With `tt((P))' this must be
+done explicitly, so for example
+tt(${LPAR()P)tt(RPAR()${LPAR()P)tt(RPAR())var(name)tt(}}).
+
+Unlike `tt((P))', named references in substitutions that perform
+assignment, such as tt(${)var(pname)tt(::=)var(word)tt(}), do not
+create new arrays when var(rname) is in the form of an array element
+or slice and no such array (or associative array) is presently set.
+This includes arrays declared, but not initialized, when the option
+tt(TYPESET_TO_UNSET) is in effect.  The var(word) is substituted but
+no assignment occurs.
+
+Also unlike `tt((P))' named references always expand parameters at the
+scope in which var(rname) exists when var(pname) is initialized.  This
+can be used to expand or assign parameters from an earlier scope even
+if a local of the same name has been declared at a later scope.
+Example:
+ifzman()
+example(tt(caller=OUTER)
+tt(func LPAR()RPAR() {)
+tt(  print before local: $caller)
+tt(  typeset -n outer=$1)
+tt(  local caller=INNER)
+tt(  print by reference: $outer)
+tt(  outer=RESULT)
+tt(})
+tt(func caller)
+tt(print after func: $caller))
+
+displays the output
+ifzman()
+example(tt(before local: OUTER)
+tt(by reference: OUTER)
+tt(after func: RESULT))
+
+To force a named reference to refer to the outer scope, even if a
+local has already been declared, add the tt(-u) option when declaring
+the named reference.  In this case var(rname) should already exist in
+the outer scope before var(pname) is initialized, otherwise the
+behavior of assignment through var(pname) is not defined and may
+change the scope of the reference or fail with a status of 1.  Example
+of correct usage:
+ifzman()
+example(tt(caller=OUTER)
+tt(func LPAR()RPAR() {)
+tt(  print before local: $caller)
+tt(  local caller=INNER)
+tt(  print after local: $caller)
+tt(  typeset -n -u outer=$1)
+tt(  print by reference: $outer)
+tt(  outer=RESULT)
+tt(})
+tt(func caller)
+tt(print after func: $caller))
+
+Note, however, that named references to em(special) parameters acquire
+the behavior of the special parameter, regardless of the scope where
+the reference is declared.
+
+In the event that the local var(pname) goes out of scope (its declaring
+function returns) before the reference var(rname) goes out of scope,
+the reference may change to another parameter having the same name as
+var(pname), or assignments may fail as described above.  Keep the
+declaration of var(rname) as close as possible to its initialization
+to var(pname) to avoid confusion.
+
+When var(rname) includes an array subscript, the subscript expression
+is interpreted at the time tt(${)var(pname)tt(}) is expanded.  Any
+form of subscript is allowed, including those that select individual
+elements, substrings of scalar strings, or multiple elements as with
+array slices or the `tt((i))', `tt((I))', `tt((r))', `tt((R))' and
+`tt((w))' subscript flags.  However, the subscript is evaluated with
+the tt(NO_EXEC) option in effect, so command substitution and other
+similar constructs produce no output, although are not syntactically
+excluded.
+
+When var(rname) is an array (but not an array element or slice), the
+named reference may also be used in substitutions requiring an
+var(arrayname), so these are equivalent:
+ifzman()
+example(tt(${)var(name)tt(:|)var(rname)tt(})
+tt(${)var(name)tt(:|)var(pname)tt(}))
+
+Expansions of the form `tt(${LPAR()t)tt(RPAR())var(pname)tt(})' expand
+the type information of var(rname), unless var(rname) is empty, in which
+case the expansion is `tt(nameref)', or when no variable var(rname)
+exists, in which case the expansion is empty.
+
+See also nmref(Parameters)(zshparam).
+
 subsect(Rules)
 cindex(parameter expansion rules)
 cindex(rules, parameter expansion)
@@ -1542,12 +1668,16 @@ substitutions; the nested substitution will return either a scalar or an
 array as determined by the flags, possibly adjusted for quoting.  All the
 following steps take place where applicable at all levels of substitution.
 
-Note that, unless the `tt((P))' flag is present, the flags and any
+Note that, unless the `tt((P))' flag or a named reference is present,
+the flags and any
 subscripts apply directly to the value of the nested substitution; for
 example, the expansion tt(${${foo}}) behaves exactly the same as
-tt(${foo}).  When the `tt((P))' flag is present in a nested substitution,
+tt(${foo}).  When a named reference or the `tt((P))' flag is used in a
+nested substitution,
 the other substitution rules are applied to the value em(before) it is
 interpreted as a name, so tt(${${(P)foo}}) may differ from tt(${(P)foo}).
+When both a named reference and the `tt((P))' flag appear, the named
+reference is resolved before `tt((P))' is applied.
 
 At each nested level of substitution, the substituted words undergo all
 forms of single-word substitution (i.e. not filename generation), including
@@ -1615,7 +1745,7 @@ returns a scalar because of the quotes).
 item(tt(7.) em(Modifiers))(
 Any modifiers, as specified by a trailing `tt(#)', `tt(%)', `tt(/)'
 (possibly doubled) or by a set of modifiers of the form `tt(:...)' (see
-noderef(Modifiers) in noderef(History Expansion)), are applied to the words
+subref(Modifiers)() in sectref(History Expansion)(above)), are applied to the words
 of the value at this level.
 )
 item(tt(8.) em(Character evaluation))(
@@ -1773,22 +1903,64 @@ sect(Command Substitution)
 cindex(command substitution)
 cindex(substitution, command)
 A command enclosed in parentheses preceded by a dollar sign, like
-`tt($LPAR())...tt(RPAR())', or quoted with grave
-accents, like `tt(`)...tt(`)', is replaced with its standard output, with
-any trailing newlines deleted.
-If the substitution is not enclosed in double quotes, the
-output is broken into words using the tt(IFS) parameter.
+`tt($LPAR())...tt(RPAR())', or quoted with grave accents, like
+`tt(`)...tt(`)', is executed in a subshell and replaced by its
+standard output, with any trailing newlines deleted.  If the
+substitution is not enclosed in double quotes, the output is broken
+into words using the tt(IFS) parameter.
 vindex(IFS, use of)
 
 The substitution `tt($LPAR()cat) var(foo)tt(RPAR())' may be replaced
 by the faster `tt($LPAR()<)var(foo)tt(RPAR())'.  In this case var(foo)
 undergoes single word shell expansions (em(parameter expansion),
 em(command substitution) and em(arithmetic expansion)), but not
-filename generation.
+filename generation.  No subshell is created.
 
 If the option tt(GLOB_SUBST) is set, the result of any unquoted command
 substitution, including the special form just mentioned, is eligible for
 filename generation.
+
+A command with a leading pipe character, enclosed in braces prefixed by
+a dollar sign, as in `tt(${|)...tt(})', is executed in the current shell
+context, rather than in a subshell, and is replaced by the value of the
+parameter tt(REPLY) at the end of the command.  There em(must not) be
+any whitespace between the opening brace and the pipe character.  Any
+prior value of tt($REPLY) is saved and restored around this substitution,
+in the manner of a function local parameter.  Other parameters declared
+within the substitution also behave as locals, as if in a function,
+unless `tt(typeset -g)' is used.  Trailing newlines are em(not) deleted
+from the final replacement in this case, and it is subject to filename
+generation in the same way as `tt($LPAR())...tt(RPAR())' but is em(not)
+split on tt(IFS) unless the tt(SH_WORD_SPLIT) option is set.
+
+cindex(substitution, command, current shell)
+cindex(substitution, command, non forking)
+cindex(substitution, nofork)
+Substitutions of the form `tt(${{)var(param)tt(}) ...tt(})' are similar,
+except that the substitution is replaced by the value of the parameter
+named by var(param).  No implicit save or restore applies to var(param)
+and var(param) should em(not) be declared within the command.  No space
+is allowed within `tt(${{)' and space or newline is required after
+`tt({)var(param)tt(})'.  The var(param) may include a subscript, and if,
+after evaluating the expression, var(param) names an array, then array
+expansion rules apply to the final substitution.
+
+A command enclosed in braces preceded by a dollar sign, and set off from
+the braces by whitespace, like `tt(${ )...tt( })', is replaced by its
+standard output.  Like `tt(${|)...tt(})' and unlike
+`tt($LPAR())...tt(RPAR())', the command executes in the current shell
+context with function local behaviors and does not create a subshell.
+Word splitting does not apply unless tt(SH_WORD_SPLIT) is set, but a
+single trailing newline is stripped unless the substitution is enclosed
+in double quotes.
+
+Note that because `tt(${|)...tt(})' and the two related substitutions
+must be parsed at once as both string tokens and commands, all other
+braces (`tt({)' or `tt(})') within the command either must be quoted,
+or must appear in syntactically valid pairs, such as around complex
+commands, function bodies, or parameter references.  Furthermore,
+comments are always recognized, even when tt(NO_INTERACTIVE_COMMENTS)
+is in effect.
 
 texinode(Arithmetic Expansion)(Brace Expansion)(Command Substitution)(Expansion)
 sect(Arithmetic Expansion)
@@ -1864,9 +2036,7 @@ has similar effects.
 
 To combine brace expansion with array expansion, see the
 tt(${^)var(spec)tt(}) form described
-ifzman(in the section `Parameter Expansion')\
-ifnzman(in noderef(Parameter Expansion))
-above.
+in sectref(Parameter Expansion)() above.
 
 texinode(Filename Expansion)(Filename Generation)(Brace Expansion)(Expansion)
 sect(Filename Expansion)
@@ -1900,14 +2070,14 @@ option exchanges the effects of `tt(~PLUS())' and `tt(~-)' where they are
 followed by a number.
 
 startmenu()
-menu(Dynamic named directories)
-menu(Static named directories)
-menu(`=' expansion)
+menu(Dynamic Named Directories)
+menu(Static Named Directories)
+menu(`=' Expansion)
 menu(Notes)
 endmenu()
 
-texinode(Dynamic named directories)(Static named directories)()(Filename Expansion)
-subsect(Dynamic named directories)
+texinode(Dynamic Named Directories)(Static Named Directories)()(Filename Expansion)
+subsect(Dynamic Named Directories)
 cindex(directories, named, dynamic)
 cindex(named directories, dynamic)
 cindex(dynamic named directories)
@@ -1961,8 +2131,7 @@ equivalent calls to elements of the array
 tt(zsh_directory_name_functions), if it exists, in order to
 complete dynamic names for directories.  The code for this should be
 as for any other completion function as described in
-ifnzman(noderef(Completion System))\
-ifzman(zmanref(zshcompsys)).
+nmref(Completion System)(zsycompsys).
 
 As a working example, here is a function that expands any dynamic names
 beginning with the string tt(p:) to directories below
@@ -1970,38 +2139,28 @@ tt(/home/pws/perforce).  In this simple case a static name for the
 directory would be just as effective.
 
 example(zsh_directory_name+LPAR()RPAR() {
-  emulate -L zsh
-  setopt extendedglob
+  emulate -L zsh -o extendedglob
   local -a match mbegin mend
-  if [[ $1 = d ]]; then
-    # turn the directory into a name
-    if [[ $2 = (#b)(/home/pws/perforce/)([^/]##)* ]]; then
-      typeset -ga reply
-      reply=(p:$match[2] $(( ${#match[1]} + ${#match[2]} )) )
-    else
-      return 1
-    fi
-  elif [[ $1 = n ]]; then
-    # turn the name into a directory
-    [[ $2 != (#b)p:(?*) ]] && return 1
-    typeset -ga reply
-    reply=(/home/pws/perforce/$match[1])
-  elif [[ $1 = c ]]; then
-    # complete names
-    local expl
-    local -a dirs
-    dirs=(/home/pws/perforce/*(/:t))
-    dirs=(p:${^dirs})
-    _wanted dynamic-dirs expl 'dynamic directory' compadd -S\] -a dirs
-    return
-  else
-    return 1
-  fi
-  return 0
+  local base=/home/pws/perforce
+  case $1 in
+  ( d )  # Turn the directory into a name.
+    [[ $2 == (#b)($base/)([^/]##)* ]] &&
+        reply=( p:$match[2] $(( $#match[1] + $#match[2] )) )
+  ;;
+  ( n )  # Turn the name into a directory.
+    [[ $2 == (#b)p:(?*) ]] &&
+        reply=( $base/$match[1] )
+  ;;
+  ( c )  # Complete names.
+    local -a dirs=( $base/*(/:t) )
+    # Completion system populates $expl with flags for compadd.
+    compadd "$expl[@]" p:$^dirs
+  ;;
+  esac
 })
 
-texinode(Static named directories)(`=' expansion)(Dynamic named directories)(Filename Expansion)
-subsect(Static named directories)
+texinode(Static Named Directories)(`=' Expansion)(Dynamic Named Directories)(Filename Expansion)
+subsect(Static Named Directories)
 cindex(directories, named, static)
 cindex(named directories, static)
 cindex(static named directories)
@@ -2027,8 +2186,8 @@ i.e. either the directory name or the full path; the name is used
 if they are the same length.
 The parameters tt($PWD) and tt($OLDPWD) are never abbreviated in this fashion.
 
-texinode(`=' expansion)(Notes)(Static named directories)(Filename Expansion)
-subsect(`=' expansion)
+texinode(`=' Expansion)(Notes)(Static Named Directories)(Filename Expansion)
+subsect(`=' Expansion)
 
 If a word begins with an unquoted `tt(=)'
 and the tt(EQUALS) option is set,
@@ -2037,7 +2196,7 @@ name of a command.  If a command
 exists by that name, the word is replaced
 by the full pathname of the command.
 
-texinode(Notes)()(`=' expansion)(Filename Expansion)
+texinode(Notes)()(`=' Expansion)(Filename Expansion)
 subsect(Notes)
 cindex(filename expansion, notes)
 Filename expansion is performed on the right hand side of a parameter
@@ -2083,6 +2242,7 @@ pindex(GLOB_DOTS, use of)
 No filename generation pattern
 matches the files `tt(.)' or `tt(..)'.  In other instances of pattern
 matching, the `tt(/)' and `tt(.)' are not treated specially.
+anchor(Glob Operators)
 subsect(Glob Operators)
 cindex(glob operators)
 startitem()
@@ -2165,9 +2325,7 @@ tt(IFS) parameter
 item(tt([:IFSSPACE:]))(
 The character is an IFS white space character; see the documentation
 for tt(IFS) in
-ifzman(the zmanref(zshparam) manual page)\
-ifnzman(noderef(Parameters Used By The Shell))\
-.
+sectref(Parameters Used by the Shell)(zshparam).
 )
 item(tt([:INCOMPLETE:]))(
 Matches a byte that starts an incomplete multibyte character.
@@ -2315,6 +2473,7 @@ than filename generation (for example, in tt(case) statements and tests
 within `tt([[)...tt(]])'), a `tt(/)' is not special; and `tt(/)' is also
 not special after a `tt(~)' appearing outside parentheses in a filename
 pattern.
+anchor(Globbing Flags)
 subsect(Globbing Flags)
 cindex(globbing flags)
 cindex(glob flags)
@@ -2511,6 +2670,7 @@ examining whole paths case-insensitively every directory must be
 searched for all files which match, so that a pattern of the form
 tt(LPAR()#i)tt(RPAR()/foo/bar/...) is potentially slow.
 
+anchor(Approximate Matching)
 subsect(Approximate Matching)
 cindex(approximate matching)
 cindex(matching, approximate)
@@ -2624,8 +2784,8 @@ will be inserted in the argument list.
 
 pindex(BARE_GLOB_QUAL, use of)
 If the option tt(BARE_GLOB_QUAL) is set, then a trailing set of parentheses
-containing no `tt(|)' or `tt(LPAR())' characters (or `tt(~)' if it is special)
-is taken as a set of
+containing no unquoted `tt(|)' or `tt(LPAR())' characters (or `tt(~)' if
+it is special due to tt(EXTENDED_GLOB)) is taken as a set of
 glob qualifiers.  A glob subexpression that would normally be taken as glob
 qualifiers, for example `tt((^x))', can be forced to be treated as part of
 the glob pattern by doubling the parentheses, in this case producing
@@ -2651,6 +2811,10 @@ should be performed; the expression may include glob qualifiers, but
 it is also valid if it is simply tt(LPAR()#q+RPAR()).  This does
 not apply to the right hand side of pattern match operators as the
 syntax already has special significance.
+
+With either syntax, normal quoting and expansion rules apply to the list
+of qualifiers, so that the forms `tt(*(.))', `tt(*(#q"."))', and
+`tt(qual=.;) var(...) tt(*(#q$qual))' are generally equivalent.
 
 A qualifier may be any one of the following:
 
@@ -2769,16 +2933,23 @@ permission.
 )
 xitem(tt(e)var(string))
 item(tt(PLUS())var(cmd))(
-The var(string) will be executed as shell code.  The filename will be
+The var(string) or var(cmd) will be executed as shell code.  The
+filename will be
 included in the list if and only if the code returns a zero status (usually
 the status of the last command).
 
 In the first form, the first character after the `tt(e)'
 will be used as a separator and anything up to the next matching separator
-will be taken  as the var(string); `tt([)', `tt({)', and `tt(<)' match
-`tt(])', `tt(})', and `tt(>)', respectively, while any other character
-matches itself. Note that expansions must be quoted in the var(string)
-to prevent them from being expanded before globbing is done.
+will be taken  as the var(string); `tt(LPAR())', `tt([)', `tt({)', and
+`tt(<)' match `tt(RPAR())', `tt(])', `tt(})', and `tt(>)', respectively,
+while any other character matches itself.
+As with glob qualifiers in general, normal quoting and expansion rules
+apply to the entire var(string).  Thus expansions must be quoted to
+prevent them from being expanded before globbing is done, and quoting
+does not normally protect the end separator if it appears in the code.
+However, if an unquoted metacharacter is used as the separator, its
+quoted/expanded form is protected.
+
 var(string) is then executed as shell code.  The string tt(globqual)
 is appended to the array tt(zsh_eval_context) the duration of
 execution.
@@ -2912,7 +3083,9 @@ enables short-circuit mode: the pattern will expand to at most var(n)
 filenames.  If more than var(n) matches exist, only the first var(n)
 matches in directory traversal order will be considered.
 
-Implies tt(oN) when no tt(o)var(c) qualifier is used.
+Any sorting specified with an tt(o)var(c) or tt(O)var(c) qualifier is
+applied em(after) the var(n) matches are returned; tt(oN) is implied
+otherwise.
 )
 item(tt(o)var(c))(
 specifies how the names of the files should be sorted. The following values
@@ -2987,17 +3160,18 @@ so both can be used on the same glob expression; for example by writing
 )
 enditem()
 
-More than one of these lists can be combined, separated by commas. The
-whole list matches if at least one of the sublists matches (they are
-`or'ed, the qualifiers in the sublists are `and'ed).  Some qualifiers,
+Multiple consecutive qualifiers are joined into a list by implicit logical AND.
+More than one of these lists can be combined using comma `tt(,)' as logical OR.
+The whole list matches if at least one of the sublists matches.
+Some qualifiers,
 however, affect all matches generated, independent of the sublist in
 which they are given.  These are the qualifiers `tt(M)', `tt(T)',
 `tt(N)', `tt(D)', `tt(n)', `tt(o)', `tt(O)' and the subscripts given
 in brackets (`tt([)var(...)tt(])').
 
 If a `tt(:)' appears in a qualifier list, the remainder of the expression in
-parenthesis is interpreted as a modifier (see noderef(Modifiers)
-in noderef(History Expansion)).  Each modifier must be introduced by a
+parenthesis is interpreted as a modifier (see subref(Modifiers)()
+in sectref(History Expansion)(above)).  Each modifier must be introduced by a
 separate `tt(:)'.  Note also that the result after modification does not
 have to be an existing file.  The name of any existing file can be followed
 by a modifier of the form `tt(LPAR():)var(...)tt(RPAR())'

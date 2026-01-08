@@ -4,7 +4,7 @@ local variant ret=1
 local -a context line state state_descr args
 local -A opt_args
 
-_pick_variant -r variant gnu='Free Soft' unix --version
+_pick_variant -r variant gnu='(Free Soft|uutils)' unix --version
 
 variant+=-$OSTYPE
 
@@ -33,7 +33,7 @@ case $variant in
     ;;
 esac
 
-args+=( '1:new root directory:_directories' '*:::command:_normal' )
+args+=( '1:new root directory:_directories' '*::: : _normal -p $service' )
 
 _arguments -s -S : $args && ret=0
 

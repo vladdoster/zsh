@@ -36,6 +36,10 @@
 
 #include "version.h"
 
+#if defined(HAVE_SYS_SYSCTL_H) && !defined(__linux)
+#include <sys/sysctl.h>
+#endif
+
 /**/
 int noexitct = 0;
 
@@ -80,7 +84,9 @@ mod_export int tclen[TC_COUNT];
 /**/
 int tclines, tccolumns;
 /**/
-mod_export int hasam, hasbw, hasxn, hasye;
+mod_export int hasam;
+/**/
+int hasxn;
 
 /* Value of the Co (max_colors) entry: may not be set */
 
@@ -93,7 +99,7 @@ mod_export int tccolours;
 mod_export sigset_t sigchld_mask;
 
 /**/
-mod_export struct hookdef zshhooks[] = {
+struct hookdef zshhooks[] = {
     HOOKDEF("exit", NULL, HOOKF_ALL),
     HOOKDEF("before_trap", NULL, HOOKF_ALL),
     HOOKDEF("after_trap", NULL, HOOKF_ALL),
@@ -207,12 +213,17 @@ loop(int toplevel, int justonce)
 		 */
 		errflag &= ~ERRFLAG_ERROR;
 	    }
+	    if (toplevel && zle_load_state == 1)
+		zleentry(ZLE_CMD_PREEXEC);
 	    if (stopmsg)	/* unset 'you have stopped jobs' flag */
 		stopmsg--;
 	    execode(prog, 0, 0, toplevel ? "toplevel" : "file");
 	    tok = toksav;
-	    if (toplevel)
+	    if (toplevel) {
 		noexitct = 0;
+		if (zle_load_state == 1)
+		    zleentry(ZLE_CMD_POSTEXEC);
+	    }
 	}
 	if (ferror(stderr)) {
 	    zerr("write error");
@@ -246,10 +257,12 @@ loop(int toplevel, int justonce)
 
 static int restricted;
 
+/* original argv[0]. This is already metafied */
+static char *argv0;
+
 /**/
 static void
-parseargs(char *zsh_name, char **argv, char **runscript, char **cmdptr,
-	  int *needkeymap)
+parseargs(char *zsh_name, char **argv, char **runscript, char **cmdptr)
 {
     char **x;
     LinkList paramlist;
@@ -257,7 +270,7 @@ parseargs(char *zsh_name, char **argv, char **runscript, char **cmdptr,
     if (**argv == '-')
 	flags |= PARSEARGS_LOGIN;
 
-    argzero = posixzero = *argv++;
+    argv0 = argzero = posixzero = *argv++;
     SHIN = 0;
 
     /*
@@ -266,7 +279,7 @@ parseargs(char *zsh_name, char **argv, char **runscript, char **cmdptr,
      * matched by code at the end of the present function.
      */
 
-    if (parseopts(zsh_name, &argv, opts, cmdptr, NULL, flags, needkeymap))
+    if (parseopts(zsh_name, &argv, opts, cmdptr, NULL, flags))
 	exit(1);
 
     /*
@@ -377,7 +390,7 @@ static void parseopts_setemulate(char *nam, int flags)
 /**/
 mod_export int
 parseopts(char *nam, char ***argvp, char *new_opts, char **cmdp,
-	  LinkList optlist, int flags, int *needkeymap)
+	  LinkList optlist, int flags)
 {
     int optionbreak = 0;
     int action, optno;
@@ -483,14 +496,8 @@ parseopts(char *nam, char ***argvp, char *new_opts, char **cmdp,
 		    return 1;
 		} else if (optno == RESTRICTED && toplevel) {
 		    restricted = action;
-		} else if ((optno == EMACSMODE || optno == VIMODE)
-			   && (!toplevel || needkeymap)){
-		    if (!toplevel) {
-			WARN_OPTION("can't change option: %s", *argv);
-		    } else {
-			/* Need to wait for modules to be loadable */
-			*needkeymap = optno;
-		    }
+		} else if ((optno == EMACSMODE || optno == VIMODE) && !toplevel) {
+		    WARN_OPTION("can't change option: %s", *argv);
 		} else {
 		    if (dosetopt(optno, action, toplevel, new_opts) &&
 			!toplevel) {
@@ -500,10 +507,10 @@ parseopts(char *nam, char ***argvp, char *new_opts, char **cmdp,
 		    }
 		}
               break;
-	    } else if (isspace(STOUC(**argv))) {
+	    } else if (isspace((unsigned char) **argv)) {
 		/* zsh's typtab not yet set, have to use ctype */
 		while (*++*argv)
-		    if (!isspace(STOUC(**argv))) {
+		    if (!isspace((unsigned char) **argv)) {
 		     badoptionstring:
 			WARN_OPTION("bad option string: '%s'", args);
 			return 1;
@@ -692,19 +699,18 @@ init_io(char *cmd)
     } else
 	opts[USEZLE] = 0;
 
-#ifdef JOB_CONTROL
     /* If interactive, make sure the shell is in the foreground and is the
      * process group leader.
      */
     mypid = (zlong)getpid();
-    if (opts[MONITOR] && (SHTTY != -1)) {
-	origpgrp = GETPGRP();
-        acquire_pgrp(); /* might also clear opts[MONITOR] */
-    } else
-	opts[MONITOR] = 0;
-#else
-    opts[MONITOR] = 0;
-#endif
+    if (opts[MONITOR]) {
+	if (SHTTY == -1)
+	    opts[MONITOR] = 0;
+	else if (!origpgrp) {
+	    origpgrp = GETPGRP();
+	    acquire_pgrp(); /* might also clear opts[MONITOR] */
+	}
+    }
 }
 
 /**/
@@ -712,7 +718,7 @@ mod_export void
 init_shout(void)
 {
     static char shoutbuf[BUFSIZ];
-#if defined(JOB_CONTROL) && defined(TIOCSETD) && defined(NTTYDISC)
+#if defined(TIOCSETD) && defined(NTTYDISC)
     int ldisc;
 #endif
 
@@ -723,7 +729,7 @@ init_shout(void)
 	return;
     }
 
-#if defined(JOB_CONTROL) && defined(TIOCSETD) && defined(NTTYDISC)
+#if defined(TIOCSETD) && defined(NTTYDISC)
     ldisc = NTTYDISC;
     ioctl(SHTTY, TIOCSETD, (char *)&ldisc);
 #endif
@@ -747,8 +753,8 @@ init_shout(void)
 static char *tccapnams[TC_COUNT] = {
     "cl", "le", "LE", "nd", "RI", "up", "UP", "do",
     "DO", "dc", "DC", "ic", "IC", "cd", "ce", "al", "dl", "ta",
-    "md", "so", "us", "me", "se", "ue", "ch",
-    "ku", "kd", "kl", "kr", "sc", "rc", "bc", "AF", "AB"
+    "md", "mh", "so", "us", "ZH", "me", "se", "ue", "ZR", "ch",
+    "ku", "kd", "kl", "kr", "sc", "rc", "bc", "AF", "AB", "vi", "ve"
 };
 
 /**/
@@ -816,9 +822,7 @@ init_term(void)
 
 	/* check whether terminal has automargin (wraparound) capability */
 	hasam = tgetflag("am");
-	hasbw = tgetflag("bw");
 	hasxn = tgetflag("xn"); /* also check for newline wraparound glitch */
-	hasye = tgetflag("YE"); /* print in last column does carriage return */
 
 	tclines = tgetnum("li");
 	tccolumns = tgetnum("co");
@@ -871,9 +875,142 @@ init_term(void)
 	rprompt_indent = 1; /* If you change this, update rprompt_indent_unsetfn() */
 	/* The following is an attempt at a heuristic,
 	 * but it fails in some cases */
+	/* int hasbw = tgetflag("bw"); */
+	/* int hasye = tgetflag("YE"); */ /* print in last column does carriage return */
 	/* rprompt_indent = ((hasam && !hasbw) || hasye || !tccan(TCLEFT)); */
+
+	/* if there's no termcap entry for italics, use CSI 3 m */
+	if (!tccan(TCITALICSBEG)) {
+	    zsfree(tcstr[TCITALICSBEG]);
+	    tcstr[TCITALICSBEG] = ztrdup("\033[3m");
+	    tclen[TCITALICSBEG] = 4;
+	}
+	if (!tccan(TCITALICSEND)) {
+	    zsfree(tcstr[TCITALICSEND]);
+	    tcstr[TCITALICSEND] = ztrdup("\033[23m");
+	    tclen[TCITALICSEND] = 5;
+	}
+	if (!tccan(TCFAINTBEG)) {
+	    zsfree(tcstr[TCFAINTBEG]);
+	    tcstr[TCFAINTBEG] = ztrdup("\033[2m");
+	    tclen[TCFAINTBEG] = 4;
+	}
     }
     return 1;
+}
+
+/*
+ * Get (or guess) the absolute pathname of the current zsh exeutable.
+ * Try OS-specific method, and if it fails, guess the absolute pathname
+ * from argv0, pwd, and PATH. 'name' and 'cwd' are unmetefied versions of
+ * argv0 and pwd.
+ * Returns a zalloc()ed string (not metafied), or NULL if failed.
+ */
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
+/**/
+static char *
+getmypath(const char *name, const char *cwd)
+{
+    char *buf;
+    int namelen;
+
+#if defined(__APPLE__)
+    {
+	uint32_t n = PATH_MAX;
+	int ret;
+	buf = (char *)zalloc(PATH_MAX);
+	if ((ret = _NSGetExecutablePath(buf, &n)) < 0) {
+	    /* try again with increased buffer size */
+	    buf = (char *)zrealloc(buf, n);
+	    ret = _NSGetExecutablePath(buf, &n);
+	}
+	if (ret == 0 && strlen(buf) > 0)
+	    return buf;
+	else
+	    free(buf);
+    }
+#elif defined(KERN_PROC_PATHNAME)
+    {
+#ifdef __NetBSD__
+	int mib[4] = { CTL_KERN, KERN_PROC_ARGS, getpid(), KERN_PROC_PATHNAME };
+#else
+	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+#endif
+	size_t len = PATH_MAX;
+	buf = (char *) zalloc(PATH_MAX);
+	if (!sysctl(mib, 4, buf, &len, NULL, 0) && len > 1)
+	    return buf;
+	free(buf);
+    }
+#elif defined(PROC_SELF_EXE)
+    {
+	ssize_t n;
+	buf = (char *)zalloc(PATH_MAX);
+	n = readlink(PROC_SELF_EXE, buf, PATH_MAX);
+	if (n > 0 && n < PATH_MAX) {
+	    buf[n] = '\0';
+	    return buf;
+	}
+	else
+	    free(buf);
+    }
+#endif
+
+    if (!name)
+	return NULL;
+    if (*name == '-')
+	++name;
+    if ((namelen = strlen(name)) == 0)
+	return NULL;
+    /* guess the absolute pathname of 'name' */
+    if (name[namelen-1] == '/')    /* name should not end with '/' */
+	return NULL;
+    else if (name[0] == '/') {
+	/* name is already an absolute pathname */
+	return ztrdup(name);
+    }
+    else if (strchr(name, '/')) {
+	/* relative path */
+	if (!cwd)
+	    return NULL;
+	buf = (char *)zalloc(strlen(cwd) + namelen + 2);
+	sprintf(buf, "%s/%s", cwd, name);
+	return buf;
+    }
+#ifdef HAVE_REALPATH
+    else {
+	/* search each dir in PATH */
+	const char *path, *sep;
+	char *real, *try;
+	int pathlen, dirlen;
+
+	path = getenv("PATH");
+	if (!path || (pathlen = strlen(path)) == 0)
+	    return NULL;
+	/* for simplicity, allocate buf even if REALPATH_ACCEPTS_NULL is on */
+	buf = (char *)zalloc(PATH_MAX);
+	try = (char *)zalloc(pathlen + namelen + 2);
+	do {
+	    sep = strchr(path, ':');
+	    dirlen = sep ? sep - path : strlen(path);
+	    memcpy(try, path, dirlen);
+	    try[dirlen] = '/';
+	    try[dirlen+1] = '\0';
+	    strcat(try, name);
+	    real = realpath(try, buf);
+	    if (sep)
+		path = sep + 1;
+	} while (!real && sep);
+	free(try);
+	if (!real)
+	    free(buf);
+	return real;	/* this may be NULL */
+    }
+#endif
+    return NULL;
 }
 
 /* Initialize lots of global variables and hash tables */
@@ -885,7 +1022,6 @@ setupvals(char *cmd, char *runscript, char *zsh_name)
 #ifdef USE_GETPWUID
     struct passwd *pswd;
 #endif
-    struct timezone dummy_tz;
     char *ptr;
     int i, j;
 #if defined(SITEFPATH_DIR) || defined(FPATH_DIR) || defined (ADDITIONAL_FPATH) || defined(FIXED_FPATH_DIR)
@@ -972,8 +1108,8 @@ setupvals(char *cmd, char *runscript, char *zsh_name)
     hatchar = '^';
     termflags = TERM_UNKNOWN;
     curjob = prevjob = coprocin = coprocout = -1;
-    gettimeofday(&shtimer, &dummy_tz);	/* init $SECONDS */
-    srand((unsigned int)(shtimer.tv_sec + shtimer.tv_usec)); /* seed $RANDOM */
+    zgettime_monotonic_if_available(&shtimer);	/* init $SECONDS */
+    srand((unsigned int)(shtimer.tv_sec + shtimer.tv_nsec)); /* seed $RANDOM */
 
     /* Set default path */
     path    = (char **) zalloc(sizeof(*path) * 5);
@@ -1067,9 +1203,12 @@ setupvals(char *cmd, char *runscript, char *zsh_name)
 	ztrdup(DEFAULT_IFS_SH) : ztrdup(DEFAULT_IFS);
     wordchars   = ztrdup(DEFAULT_WORDCHARS);
     postedit    = ztrdup("");
-    zunderscore  = (char *) zalloc(underscorelen = 32);
-    underscoreused = 1;
-    *zunderscore = '\0';
+    /* If _ is set in environment then initialize our $_ by copying it */
+    zunderscore = getenv("_");
+    zunderscore = zunderscore ? metafy(zunderscore, -1, META_DUP) : ztrdup("");
+    underscoreused = strlen(zunderscore) + 1;
+    underscorelen = (underscoreused + 31) & ~31;
+    zunderscore = (char *)zrealloc(zunderscore, underscorelen);
 
     zoptarg = ztrdup("");
     zoptind = 1;
@@ -1089,8 +1228,8 @@ setupvals(char *cmd, char *runscript, char *zsh_name)
 #ifdef USE_GETPWUID
     if ((pswd = getpwuid(cached_uid))) {
 	if (EMULATION(EMULATE_ZSH))
-	    home = metafy(pswd->pw_dir, -1, META_DUP);
-	cached_username = ztrdup(pswd->pw_name);
+	    home = ztrdup_metafy(pswd->pw_dir);
+	cached_username = ztrdup_metafy(pswd->pw_name);
     }
     else
 #endif /* USE_GETPWUID */
@@ -1119,7 +1258,11 @@ setupvals(char *cmd, char *runscript, char *zsh_name)
 	pwd = metafy(zgetcwd(), -1, META_DUP);
     }
 
-    oldpwd = ztrdup(pwd);  /* initialize `OLDPWD' = `PWD' */
+    oldpwd = zgetenv("OLDPWD");
+    if (oldpwd == NULL)
+        oldpwd = ztrdup(pwd);  /* initialize `OLDPWD' = `PWD' */
+    else
+	oldpwd = ztrdup(oldpwd);
 
     inittyptab();     /* initialize the ztypes table */
     initlextabs();    /* initialize lexing tables    */
@@ -1139,7 +1282,7 @@ setupvals(char *cmd, char *runscript, char *zsh_name)
     adjustwinsize(0);
 #else
     /* columns and lines are normally zero, unless something different *
-     * was inhereted from the environment.  If either of them are zero *
+     * was inherited from the environment.  If either of them are zero *
      * the setiparam calls below set them to the defaults from termcap */
     setiparam("COLUMNS", zterm_columns);
     setiparam("LINES", zterm_lines);
@@ -1153,7 +1296,7 @@ setupvals(char *cmd, char *runscript, char *zsh_name)
 #endif
 
     breaks = loops = 0;
-    lastmailcheck = time(NULL);
+    lastmailcheck = zmonotime(NULL);
     locallevel = sourcelevel = 0;
     sfcontext = SFC_NONE;
     trap_return = 0;
@@ -1175,6 +1318,18 @@ setupvals(char *cmd, char *runscript, char *zsh_name)
     /* Colour sequences for outputting colours in prompts and zle */
     set_default_colour_sequences();
 
+    /* ZSH_EXEPATH */
+    {
+	char *mypath, *exename, *cwd;
+	exename = unmetafy(ztrdup(argv0), NULL);
+	cwd = pwd ? unmetafy(ztrdup(pwd), NULL) : NULL;
+	mypath = getmypath(exename, cwd);
+	free(exename);
+	free(cwd);
+	if (mypath) {
+	    setsparam("ZSH_EXEPATH", metafy(mypath, -1, META_REALLOC));
+	}
+    }
     if (cmd)
 	setsparam("ZSH_EXECUTION_STRING", ztrdup(cmd));
     if (runscript)
@@ -1244,6 +1399,11 @@ setupshin(char *runscript)
 void
 init_signals(void)
 {
+    struct sigaction act;
+
+    sigtrapped = (int *) hcalloc(TRAPCOUNT * sizeof(int));
+    siglists = (Eprog *) hcalloc(TRAPCOUNT * sizeof(Eprog));
+
     if (interact) {
 	int i;
 	signal_setmask(signal_mask(0));
@@ -1254,14 +1414,8 @@ init_signals(void)
 
     intr();
 
-#ifdef POSIX_SIGNALS
-    {
-	struct sigaction act;
-	if (!sigaction(SIGQUIT, NULL, &act) &&
-	    act.sa_handler == SIG_IGN)
-	    sigtrapped[SIGQUIT] = ZSIG_IGNORED;
-    }
-#endif
+    if (!sigaction(SIGQUIT, NULL, &act) && act.sa_handler == SIG_IGN)
+	sigtrapped[SIGQUIT] = ZSIG_IGNORED;
 
 #ifndef QDEBUG
     signal_ignore(SIGQUIT);
@@ -1654,8 +1808,7 @@ VA_DCL
 
 	lp = va_arg(ap, char **);
 
-	pptbuf = unmetafy(promptexpand(lp ? *lp : NULL, 0, NULL, NULL,
-				       NULL),
+	pptbuf = unmetafy(promptexpand(lp ? *lp : NULL, 0, NULL, NULL, NULL),
 			  &pptlen);
 	write_loop(2, pptbuf, pptlen);
 	free(pptbuf);
@@ -1711,7 +1864,7 @@ zsh_main(UNUSED(int argc), char **argv)
 {
     char **t, *runscript = NULL, *zsh_name;
     char *cmd;			/* argument to -c */
-    int t0, needkeymap = 0;
+    int t0;
 #ifdef USE_LOCALE
     setlocale(LC_ALL, "");
 #endif
@@ -1724,9 +1877,9 @@ zsh_main(UNUSED(int argc), char **argv)
      * interactive
      */
     typtab['\0'] |= IMETA;
-    typtab[STOUC(Meta)  ] |= IMETA;
-    typtab[STOUC(Marker)] |= IMETA;
-    for (t0 = (int)STOUC(Pound); t0 <= (int)STOUC(Nularg); t0++)
+    typtab[(unsigned char) Meta  ] |= IMETA;
+    typtab[(unsigned char) Marker] |= IMETA;
+    for (t0 = (int) (unsigned char) Pound; t0 <= (int) (unsigned char) Nularg; t0++)
 	typtab[t0] |= ITOK | IMETA;
 
     for (t = argv; *t; *t = metafy(*t, -1, META_ALLOC), t++);
@@ -1757,7 +1910,7 @@ zsh_main(UNUSED(int argc), char **argv)
     createoptiontable();
     /* sets emulation, LOGINSHELL, PRIVILEGED, ZLE, INTERACTIVE,
      * SHINSTDIN and SINGLECOMMAND */ 
-    parseargs(zsh_name, argv, &runscript, &cmd, &needkeymap);
+    parseargs(zsh_name, argv, &runscript, &cmd);
 
     SHTTY = -1;
     init_io(cmd);
@@ -1766,15 +1919,6 @@ zsh_main(UNUSED(int argc), char **argv)
     init_signals();
     init_bltinmods();
     init_builtins();
-
-    if (needkeymap)
-    {
-	/* Saved for after module system initialisation */
-	zleentry(ZLE_CMD_SET_KEYMAP, needkeymap);
-	opts[needkeymap] = 1;
-	opts[needkeymap == EMACSMODE ? VIMODE : EMACSMODE] = 0;
-    }
-
     run_init_scripts();
     setupshin(runscript);
     init_misc(cmd, zsh_name);

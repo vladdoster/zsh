@@ -43,6 +43,7 @@ TEXI2DVI = @TEXI2DVI@
 DVIPS = dvips
 TEXI2PDF  = @TEXI2PDF@
 TEXI2HTML = @TEXI2HTML@
+SET_TEXI2ANY_VAR = @SET_TEXI2ANY_VAR@
 PAPERSIZE = @PAPERSIZE@
 
 .SUFFIXES: .yo .1
@@ -62,11 +63,12 @@ Zsh/mod_attr.yo Zsh/mod_cap.yo Zsh/mod_clone.yo \
 Zsh/mod_compctl.yo Zsh/mod_complete.yo Zsh/mod_complist.yo \
 Zsh/mod_computil.yo Zsh/mod_curses.yo \
 Zsh/mod_datetime.yo Zsh/mod_db_gdbm.yo Zsh/mod_deltochar.yo \
-Zsh/mod_example.yo Zsh/mod_files.yo Zsh/mod_langinfo.yo \
-Zsh/mod_mapfile.yo Zsh/mod_mathfunc.yo \
+Zsh/mod_example.yo Zsh/mod_files.yo \
+Zsh/mod_hlgroup.yo Zsh/mod_langinfo.yo \
+Zsh/mod_ksh93.yo Zsh/mod_mapfile.yo Zsh/mod_mathfunc.yo \
 Zsh/mod_nearcolor.yo Zsh/mod_newuser.yo \
 Zsh/mod_parameter.yo Zsh/mod_pcre.yo Zsh/mod_private.yo \
-Zsh/mod_regex.yo Zsh/mod_sched.yo Zsh/mod_socket.yo \
+Zsh/mod_regex.yo Zsh/mod_random.yo Zsh/mod_sched.yo Zsh/mod_socket.yo \
 Zsh/mod_stat.yo  Zsh/mod_system.yo Zsh/mod_tcp.yo \
 Zsh/mod_termcap.yo Zsh/mod_terminfo.yo \
 Zsh/mod_watch.yo \
@@ -116,15 +118,20 @@ zsh.pdf zsh_a4.pdf zsh_us.pdf: $(sdir)/zsh.texi
 	  $(TEXI2PDF) -o $@ -t @afourpaper $(sdir)/zsh.texi; \
 	fi
 
-# Use roff2ps / ps2pdf because pdfroff produces doubled output.
 intro.pdf intro.a4.pdf intro.us.pdf: $(sdir)/intro.ms
 	if test $@ = intro.us.pdf || \
 	  { test $@ = intro.pdf && test "$(PAPERSIZE)" = us; }; then \
-	  roff2ps -ms -P-pletter < $(sdir)/intro.ms > intro.ps; \
+	  pdfroff -mspdf --no-kill-null-pages -P-pletter --pdf-output=$@ $(sdir)/intro.ms; \
 	else \
-	  roff2ps -ms -P-pa4 < $(sdir)/intro.ms > intro.ps; \
-	fi; \
-	ps2pdf -sOutputFile=$@ intro.ps
+	  pdfroff -mspdf --no-kill-null-pages -P-pa4 --pdf-output=$@ $(sdir)/intro.ms; \
+	fi
+
+intro.html: $(sdir)/intro.ms
+	if groff -ms -Thtml -P-jintro $(sdir)/intro.ms > tmp.html; then \
+	  mv tmp.html $@; \
+	else \
+	  rm -f tmp.html; false; \
+	fi
 
 texi: $(sdir)/zsh.texi
 .PHONY: texi
@@ -170,7 +177,7 @@ a4_ps: zsh_a4.ps
 zsh_a4.ps: zsh_a4.dvi
 	$(DVIPS) -t a4 -o $@ zsh_a4.dvi
 
-html: zsh_toc.html
+html: zsh_toc.html intro.html
 .PHONY: html
 
 zsh_toc.html: $(sdir)/zsh.texi texi2html.conf
@@ -266,7 +273,7 @@ texi2html.conf: $(sdir_top)/Config/version.mk
 	d=`echo $(VERSION_DATE)`; \
 	v="<font size=\"-1\">Zsh version $(VERSION), released on $$d.</font>"; \
 	case '$(TEXI2HTML)' in \
-	  *texi2any*) echo "set_from_init_file('PRE_BODY_CLOSE','$$v');" ;; \
+	  *texi2any*) echo "$(SET_TEXI2ANY_VAR)('PRE_BODY_CLOSE','$$v');" ;; \
 	  *) echo "\$$PRE_BODY_CLOSE = '$$v';" ;; \
 	esac > $@
 
@@ -407,7 +414,7 @@ uninstall.html:
 
 clean-here:
 	rm -f *.html *.info* *.dvi *.ps *.pdf
-	rm -f *.aux *.cp *.cps *.fn *.fns *.ky *.log
+	rm -f *.aux *.cp *.cps *.fn *.fns *.ky *.kys *.log *.idx
 	rm -f *.pg *.pgs *.toc *.tp *.tps *.vr *.vrs
 	rm -rf infodir
 	rm -f texi2html.conf

@@ -670,6 +670,22 @@ F:Must be tested with a top-level script rather than source or function
 >before-out
 >before-in
 
+  (set -o err_return
+    fn() {
+      print before-in
+      { false; true } && true
+      print after-in
+    }
+    print before-out
+    fn && true
+    print after-out
+  )
+0:ERR_RETURN not triggered on LHS of "&&" in function on LHS of "&&" (regression test)
+>before-out
+>before-in
+>after-in
+>after-out
+
   mkdir -p zdotdir
   print >zdotdir/.zshenv '
   setopt norcs errreturn
@@ -713,12 +729,43 @@ F:Must be tested with a top-level script rather than source or function
     fi
   }
   fn() {
-    setopt err_return
+    setopt localoptions err_return
     fn2 || true
   }
   fn
 0:ERR_RETURN in "else" branch in nested function
 >Good
+
+  (setopt err_exit
+  ! true
+  print OK
+  )
+0:ERR_EXIT not triggered by "! true"
+>OK
+
+  (setopt err_exit
+  fn() { true }
+  ! fn
+  print OK
+  )
+0:ERR_EXIT not triggered by "! fn"
+>OK
+
+  (setopt err_exit
+  false && true
+  print OK
+  )
+0:ERR_EXIT not triggered by "false && true"
+>OK
+
+  (setopt err_exit
+  fn() {
+    false && true
+  }
+  fn
+  print OK
+  )
+1:ERR_EXIT not triggered by "false && true" but by return from fn
 
   (setopt err_exit
   for x in y; do
@@ -730,14 +777,15 @@ F:Must be tested with a top-level script rather than source or function
 >OK
 
   (setopt err_exit
-  integer x=0
-  while (( ! x++ )); do
-    false && true
-  done
+  fn() {
+    for x in y; do
+      false && true
+    done
+  }
+  fn
   print OK
   )
-0:ERR_EXIT not triggered by status 1 at end of while
->OK
+1:ERR_EXIT not triggered by status 1 at end of for but by return from fn
 
   (setopt err_exit
   repeat 1; do
@@ -749,6 +797,17 @@ F:Must be tested with a top-level script rather than source or function
 >OK
 
   (setopt err_exit
+  fn() {
+    repeat 1; do
+      false && true
+    done
+  }
+  fn
+  print OK
+  )
+1:ERR_EXIT not triggered by status 1 at end of repeat but by return from fn
+
+  (setopt err_exit
   if true; then
     false && true
   fi
@@ -758,6 +817,71 @@ F:Must be tested with a top-level script rather than source or function
 >OK
 
   (setopt err_exit
+  fn() {
+    if true; then
+      false && true
+    fi
+  }
+  fn
+  print OK
+  )
+1:ERR_EXIT not triggered by status 1 at end of if but by return from fn
+
+  (setopt err_exit
+  loop=true
+  while print COND; $loop; do
+    loop=false
+    false && true
+  done
+  print OK
+  )
+0:ERR_EXIT not triggered by status 1 at end of while
+>COND
+>COND
+>OK
+
+  (setopt err_exit
+  fn() {
+    loop=true
+    while print COND; $loop; do
+      loop=false
+      false && true
+    done
+  }
+  fn
+  print OK
+  )
+1:ERR_EXIT not triggered by status 1 at end of while but by return from fn
+>COND
+>COND
+
+  (setopt err_exit
+  {
+    false && true
+  } always {
+    print ALWAYS
+  }
+  print OK
+  )
+0:ERR_EXIT not triggered by status 1 at end of always
+>ALWAYS
+>OK
+
+  (setopt err_exit
+  fn() {
+    {
+      false && true
+    } always {
+      print ALWAYS
+    }
+  }
+  fn
+  print OK
+  )
+1:ERR_EXIT not triggered by status 1 at end of always but by return from fn
+>ALWAYS
+
+  (setopt err_exit
   {
     false && true
   }
@@ -765,6 +889,17 @@ F:Must be tested with a top-level script rather than source or function
   )
 0:ERR_EXIT not triggered by status 1 at end of { }
 >OK
+
+  (setopt err_exit
+  fn() {
+    {
+      false && true
+    }
+  }
+  fn
+  print OK
+  )
+1:ERR_EXIT not triggered by status 1 at end of { } but by return from fn
 
   unsetopt err_exit err_return
   (setopt err_exit
@@ -818,6 +953,74 @@ F:Must be tested with a top-level script rather than source or function
   )
 1:ERR_EXIT triggered by status 1 at end of anon func
 >Still functioning
+
+  (setopt err_exit
+  loop=true; while print loop $? >&2; $loop; do loop=false; false && true; done
+  print done $? >&2
+  )
+0: ERR_EXIT neither triggered inside loop nor triggered by while statement
+?loop 0
+?loop 1
+?done 1
+
+  (setopt err_exit
+  { loop=true; while print loop $? >&2; $loop; do loop=false; false && true; done } || false
+  print done $? >&2
+  )
+1: ERR_EXIT not triggered inside loop but triggered by rhs of ||
+?loop 0
+?loop 1
+
+  (setopt err_exit
+  eval 'loop=true; while print loop $? >&2; $loop; do loop=false; false && true; done'
+  print done $? >&2
+  )
+1: ERR_EXIT not triggered inside loop but triggered by eval
+?loop 0
+?loop 1
+
+  (setopt err_exit
+  source <(echo 'loop=true; while print loop $? >&2; $loop; do loop=false; false && true; done')
+  print done $? >&2
+  )
+1: ERR_EXIT not triggered inside loop but triggered by source
+?loop 0
+?loop 1
+
+  (setopt err_exit
+  v=$(loop=true; while print loop $? >&2; $loop; do loop=false; false && true; done)
+  print done $? >&2
+  )
+1: ERR_EXIT not triggered inside loop but triggered by command substitution
+?loop 0
+?loop 1
+
+  ( set -e; true && {false; echo NOT REACHED} )
+  ( trap "print Trapped!" ERR; true && {false} )
+  ( trap "print Trapped!" ERR; true && if true; then false; fi )
+  ( trap "print Trapped!" ERR; true && {false} always {true} )
+  ( true && (set -e; false; echo NOT REACHED) )
+  ( true && (trap "print Trapped!" ERR; false) )
+  ( true && { set -e; false; echo NOT REACHED } )
+  ( true && { trap "print Trapped!" ERR; false } )
+  ( set -e; true && (false; echo one) || echo two )
+  ( set -e; true && { false; echo one; } || echo two )
+0:ERR_EXIT is triggered by last command in an AND-OR list
+>Trapped!
+>Trapped!
+>Trapped!
+>Trapped!
+>Trapped!
+>one
+>one
+
+  ( set -o ERR_RETURN; f() { false; echo NOT REACHED;  }; f || true; echo OK )
+  ( set -o ERR_RETURN; f() { true && false; echo NOT REACHED;  }; f || true; echo OK )
+  ( set -o ERR_RETURN; f() { true && { false }; echo NOT REACHED;  }; f || true; echo OK )
+0:ERR_RETURN is triggered in function calls on the left of an AND-OR
+>OK
+>OK
+>OK
 
   if zmodload zsh/system 2>/dev/null; then
   (
@@ -906,6 +1109,17 @@ F:Must be tested with a top-level script rather than source or function
 >fn1
 >trap1
 # As of 5.7.1-test-2, the output was "out1 fn1 trap1 fn2" (on separate lines).
+
+  TRAPEXIT() { echo This is TRAPEXIT; }
+  TRAPEXIT
+  TRAPEXIT
+  TRAPEXIT
+0:No memory problems with explicit call to TRAPEXIT.
+>This is TRAPEXIT
+>This is TRAPEXIT
+>This is TRAPEXIT
+>This is TRAPEXIT
+# Three explicit calls, one implicit call at function exit.
 
 %clean
 

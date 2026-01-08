@@ -1,19 +1,7 @@
 %prep
 
-# Find a UTF-8 locale.
-  setopt multibyte
-# Don't let LC_* override our choice of locale.
-  unset -m LC_\*
-  mb_ok=
-  langs=(en_{US,GB}.{UTF-,utf}8 en.UTF-8
-	 $(locale -a 2>/dev/null | egrep 'utf8|UTF-8'))
-  for LANG in $langs; do
-    if [[ é = ? ]]; then
-      mb_ok=1
-      break;
-    fi
-  done
-  if [[ -z $mb_ok ]]; then
+  LANG=$(ZTST_find_UTF8)
+  if [[ -z $LANG ]]; then
     ZTST_unimplemented="no UTF-8 locale or multibyte mode is not implemented"
   else
     print -u $ZTST_fd Testing multibyte with locale $LANG
@@ -223,6 +211,20 @@
 <first£second£
 >first
 >second
+
+  read -ed £
+0:read with multibyte delimiter where bytes of delimiter also occur in input
+<one¤twoãthree£four
+>one¤twoãthree
+
+  read -ed $'\xa0' <<<$'first\xa0second'
+0:read delimited by a byte that isn't a valid multibyte character
+>first
+
+  read -ed $'\xc2'
+0:read delimited by a single byte terminates if the byte is part of a multibyte character
+<one£two
+>one
 
   (IFS=«
   read -d » -A array

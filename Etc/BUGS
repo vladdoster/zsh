@@ -46,7 +46,18 @@ related, probably obsolete, vared special case for $TERM set to "emacs".
 ------------------------------------------------------------------------
 47561: [PATCH v4] vcs_info: choose backend by basedir
 ------------------------------------------------------------------------
-48091: Bug in compdescribe with matcher 'b:-=+'
+48091, 49276: Bug in compdescribe with matcher 'b:-=+'
 ------------------------------------------------------------------------
 users/26071: Strange behavior about option completion of "git push --f"
 ------------------------------------------------------------------------
+50930: If a conditional expression appears in a current-shell construct
+(such as { sleep 20 && print $? }) which is then suspended with ^Z, the
+return value of the left side of the expression is always 148 (SIGTSTP)
+and thus the expression is likely to be incorrectly interpreted.
+------------------------------------------------------------------------
+52521: Empty files and unreadable files cannot be removed using the
+mapfile module "unset 'mapfile[filename]'", and are not distinguished
+from files that do not exist.
+------------------------------------------------------------------------
+52747,52755: HIST_IGNORE_DUPS et. al. ignore syntactically significant
+quoted whitespace and can incorrectly exclude commands as duplicates.

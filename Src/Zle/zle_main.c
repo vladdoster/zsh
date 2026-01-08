@@ -126,8 +126,7 @@ mod_export Thingy lbindk, bindk;
 /**/
 int insmode;
 
-/**/
-mod_export int eofchar;
+static int eofchar;
 
 static int eofsent;
 /*
@@ -427,7 +426,7 @@ enum ztmouttp {
      * there's no general way to fix up if that's wrong.
      */
     ZTM_MAX
-#define	ZMAXTIMEOUT	((time_t)1 << (sizeof(time_t)*8-11))
+#define	ZMAXTIMEOUT	((time_t)1 << (sizeof(int)*8-11))
 };
 
 struct ztmout {
@@ -737,6 +736,7 @@ raw_getbyte(long do_keytmout, char *cptr, int full)
 			) {
 			/* Handle the fd. */
 			char *fdbuf;
+			Thingy save_lbindk = refthingy(lbindk);
 			{
 			    char buf[BDIGBUFSIZE];
 			    convbase(buf, lwatch_fd->fd, 10);
@@ -779,6 +779,8 @@ raw_getbyte(long do_keytmout, char *cptr, int full)
 			     */
 			    errtry = 1;
 			}
+			unrefthingy(lbindk);
+			lbindk = save_lbindk;
 		    }
 		}
 		/* Function may have invalidated the display. */
@@ -876,7 +878,7 @@ getbyte(long do_keytmout, int *timeout, int full)
 #endif
 
     if (kungetct)
-	ret = STOUC(kungetbuf[--kungetct]);
+	ret = (unsigned char) kungetbuf[--kungetct];
     else {
 	for (;;) {
 	    int q = queue_signal_level();
@@ -940,7 +942,7 @@ getbyte(long do_keytmout, int *timeout, int full)
 	else if (cc == '\n')
 	    cc = '\r';
 
-	ret = STOUC(cc);
+	ret = (unsigned char) cc;
     }
     /*
      * curvichg.buf is raw bytes, not wide characters, so is dealt
@@ -1213,9 +1215,10 @@ zlecore(void)
 char *
 zleread(char **lp, char **rp, int flags, int context, char *init, char *finish)
 {
-    char *s, **bracket;
+    char *s;
     int old_errno = errno;
     int tmout = getiparam("TMOUT");
+    const char **markers = prompt_markers();
 
 #if defined(HAVE_POLL) || defined(HAVE_SELECT)
     /* may not be set, but that's OK since getiparam() returns 0 == off */
@@ -1230,9 +1233,9 @@ zleread(char **lp, char **rp, int flags, int context, char *init, char *finish)
 	char *pptbuf;
 	int pptlen;
 
-	pptbuf = unmetafy(promptexpand(lp ? *lp : NULL, 0, NULL, NULL,
-				       &pmpt_attr),
+	pptbuf = unmetafy(promptexpand(lp ? *lp : NULL, 0, NULL, NULL, NULL),
 			  &pptlen);
+	pmpt_attr = txtcurrentattrs;
 	write_loop(2, pptbuf, pptlen);
 	free(pptbuf);
 	return shingetline();
@@ -1267,10 +1270,14 @@ zleread(char **lp, char **rp, int flags, int context, char *init, char *finish)
     fetchttyinfo = 0;
     trashedzle = 0;
     raw_lp = lp;
-    lpromptbuf = promptexpand(lp ? *lp : NULL, 1, NULL, NULL, &pmpt_attr);
+    txtcurrentattrs = txtpendingattrs = txtunknownattrs = 0;
+    lpromptbuf = promptexpand(lp ? *lp : NULL, 1,
+	    markers[flags == ZLCON_LINE_CONT ? 2 : 1], NULL, NULL);
+    pmpt_attr = txtcurrentattrs;
     raw_rp = rp;
-    rpmpt_attr = pmpt_attr;
-    rpromptbuf = promptexpand(rp ? *rp : NULL, 1, NULL, NULL, &rpmpt_attr);
+    rpromptbuf = promptexpand(rp ? *rp : NULL, 1, markers[2], NULL, NULL);
+    rpmpt_attr = txtcurrentattrs;
+    prompt_attr = mixattrs(pmpt_attr, pmpt_attr & TXT_ATTR_ALL, rpmpt_attr);
     free_prepostdisplay();
 
     zlereadflags = flags;
@@ -1339,6 +1346,10 @@ zleread(char **lp, char **rp, int flags, int context, char *init, char *finish)
     prefixflag = 0;
     region_active = 0;
 
+    /* semantic prompt marker printed before first prompt */
+    if (*markers)
+	write_loop(2, *markers, strlen(*markers));
+
     zrefresh();
 
     unqueue_signals();	/* Should now be safe to acknowledge SIGWINCH */
@@ -1348,8 +1359,7 @@ zleread(char **lp, char **rp, int flags, int context, char *init, char *finish)
     if (zleline && *zleline)
 	redrawhook();
 
-    if ((bracket = getaparam("zle_bracketed_paste")) && arrlen(bracket) == 2)
-	fputs(*bracket, shout);
+    start_edit();
 
     zrefresh();
 
@@ -1360,8 +1370,7 @@ zleread(char **lp, char **rp, int flags, int context, char *init, char *finish)
 		  "ZLE_VARED_ABORTED" :
 		  "ZLE_LINE_ABORTED", zlegetline(NULL, NULL));
 
-    if ((bracket = getaparam("zle_bracketed_paste")) && arrlen(bracket) == 2)
-	fputs(bracket[1], shout);
+    end_edit();
 
     if (done && !exit_pending && !errflag)
 	zlecallhook(finish, NULL);
@@ -1726,7 +1735,7 @@ bin_vared(char *name, char **args, Options ops, UNUSED(int func))
 	    zwarnnam(name, "not an identifier: `%s'", args[0]);
 	    return 1;
 	}
-	if (v->isarr) {
+	if (v->scanflags) {
 	    /* Array: check for separators and quote them. */
 	    char **arr = getarrvalue(v), **aptr, **tmparr, **tptr;
 	    tptr = tmparr = (char **)zhalloc(sizeof(char *)*(arrlen(arr)+1));
@@ -1890,11 +1899,13 @@ describekeybriefly(UNUSED(char **args))
 	return 1;
     clearlist = 1;
     statusline = "Describe key briefly: _";
+    start_edit();
     zrefresh();
     if (invicmdmode() && region_active && (km = openkeymap("visual")))
         selectlocalmap(km);
     seq = getkeymapcmd(curkeymap, &func, &str);
     selectlocalmap(NULL);
+    end_edit();
     statusline = NULL;
     if(!*seq)
 	return 1;
@@ -1992,6 +2003,7 @@ reexpandprompt(void)
     static int looping;
 
     if (!reexpanding++) {
+	const char **markers = prompt_markers();
 	/*
 	 * If we're displaying a status in the prompt, it
 	 * needs to be the toplevel one, not the one from
@@ -2009,17 +2021,18 @@ reexpandprompt(void)
 	    char *new_lprompt, *new_rprompt;
 	    looping = reexpanding;
 
-	    new_lprompt = promptexpand(raw_lp ? *raw_lp : NULL, 1, NULL, NULL,
-				       &pmpt_attr);
+	    txtcurrentattrs = txtpendingattrs = txtunknownattrs = 0;
+	    new_lprompt = promptexpand(raw_lp ? *raw_lp : NULL, 1, markers[0], NULL, NULL);
+	    pmpt_attr = txtcurrentattrs;
 	    free(lpromptbuf);
 	    lpromptbuf = new_lprompt;
 
 	    if (looping != reexpanding)
 		continue;
 
-	    rpmpt_attr = pmpt_attr;
-	    new_rprompt = promptexpand(raw_rp ? *raw_rp : NULL, 1, NULL, NULL,
-				       &rpmpt_attr);
+	    new_rprompt = promptexpand(raw_rp ? *raw_rp : NULL, 1, markers[2], NULL, NULL);
+	    rpmpt_attr = txtcurrentattrs;
+	    prompt_attr = mixattrs(pmpt_attr, pmpt_attr & TXT_ATTR_ALL, rpmpt_attr);
 	    free(rpromptbuf);
 	    rpromptbuf = new_rprompt;
 	} while (looping != reexpanding);
@@ -2041,7 +2054,7 @@ resetprompt(UNUSED(char **args))
 /* same bug called from outside zle */
 
 /**/
-mod_export void
+static void
 zle_resetprompt(void)
 {
     reexpandprompt();
@@ -2065,6 +2078,8 @@ trashzle(void)
 	trashedzle = 1;
 	zrefresh();
 	showinglist = sl;
+	treplaceattrs(prompt_attr);
+	applytextattributes(0);
 	moveto(nlnct, 0);
 	if (clearflag && tccan(TCCLEAREOD)) {
 	    tcout(TCCLEAREOD);
@@ -2169,6 +2184,18 @@ zle_main_entry(int cmd, va_list ap)
 	break;
     }
 
+    case ZLE_CMD_PREEXEC:
+	mark_output(1);
+	break;
+
+    case ZLE_CMD_POSTEXEC:
+	mark_output(0);
+	break;
+
+    case ZLE_CMD_CHPWD:
+	notify_pwd();
+	break;
+
     default:
 #ifdef DEBUG
 	    dputs("Bad command %d in zle_main_entry", cmd);
@@ -2230,6 +2257,10 @@ setup_(UNUSED(Module m))
     kungetbuf = (char *) zalloc(kungetsz = 32);
     comprecursive = 0;
     rdstrs = NULL;
+
+    /* detect terminal color and features */
+    if (shout)
+	query_terminal();
 
     /* initialise the keymap system */
     init_keymaps();

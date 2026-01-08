@@ -13,8 +13,9 @@
     signam = substr(tmp[1], 4, 20)
     signum = tmp[2]
     if (signam == "CHLD" && sig[signum] == "CLD")  sig[signum] = ""
-    if (signam == "POLL" && sig[signum] == "IO")  sig[signum] = ""
-    if (sig[signum] == "") {
+    if (signam == "POLL" && sig[signum] == "IO")   sig[signum] = ""
+    if (signam == "ABRT" && sig[signum] == "IOT")  sig[signum] = ""
+    if (signam !~ /RTM(IN|AX)/ && sig[signum] == "") {
 	sig[signum] = signam
 	if (0 + max < 0 + signum && signum < 60)
 	    max = signum
@@ -26,6 +27,7 @@
 	if (signam == "CONT")   { msg[signum] = "continued" }
 	if (signam == "EMT")    { msg[signum] = "EMT instruction" }
 	if (signam == "FPE")    { msg[signum] = "floating point exception" }
+        if (signam == "FREEZE") { msg[signum] = "checkpoint freeze" }
 	if (signam == "HUP")    { msg[signum] = "hangup" }
 	if (signam == "ILL")    { msg[signum] = "illegal hardware instruction" }
 	if (signam == "INFO")   { msg[signum] = "status request from keyboard" }
@@ -33,23 +35,25 @@
 	if (signam == "IO")     { msg[signum] = "i/o ready" }
 	if (signam == "IOT")    { msg[signum] = "IOT instruction" }
 	if (signam == "KILL")   { msg[signum] = "killed" }
-	if (signam == "LOST")	{ msg[signum] = "resource lost" }
+	if (signam == "LOST")   { msg[signum] = "resource lost" }
 	if (signam == "PIPE")   { msg[signum] = "broken pipe" }
-	if (signam == "POLL")	{ msg[signum] = "pollable event occurred" }
+	if (signam == "POLL")   { msg[signum] = "pollable event occurred" }
 	if (signam == "PROF")   { msg[signum] = "profile signal" }
 	if (signam == "PWR")    { msg[signum] = "power fail" }
 	if (signam == "QUIT")   { msg[signum] = "quit" }
 	if (signam == "SEGV")   { msg[signum] = "segmentation fault" }
 	if (signam == "SYS")    { msg[signum] = "invalid system call" }
 	if (signam == "TERM")   { msg[signum] = "terminated" }
+        if (signam == "THAW")   { msg[signum] = "checkpoint thaw" }
 	if (signam == "TRAP")   { msg[signum] = "trace trap" }
-	if (signam == "URG")	{ msg[signum] = "urgent condition" }
+	if (signam == "URG")    { msg[signum] = "urgent condition" }
 	if (signam == "USR1")   { msg[signum] = "user-defined signal 1" }
 	if (signam == "USR2")   { msg[signum] = "user-defined signal 2" }
 	if (signam == "VTALRM") { msg[signum] = "virtual time alarm" }
 	if (signam == "WINCH")  { msg[signum] = "window size changed" }
 	if (signam == "XCPU")   { msg[signum] = "cpu limit exceeded" }
 	if (signam == "XFSZ")   { msg[signum] = "file size limit exceeded" }
+        if (signam == "XRES")   { msg[signum] = "resource control exceeded" }
     }
 }
 
@@ -63,10 +67,6 @@ END {
     printf "#define SIGCOUNT\t%d\n", max
     printf "\n"
     printf "#include %czsh.mdh%c\n", 34, 34
-    printf "\n"
-    printf "/**/\n"
-    printf "#define sigmsg(sig) ((sig) <= SIGCOUNT ? sig_msg[sig]"
-    printf " : %c%s%c)", 34, "unknown signal", 34
     printf "\n"
     printf "/**/\n"
     printf "mod_export char *sig_msg[SIGCOUNT+2] = {\n"

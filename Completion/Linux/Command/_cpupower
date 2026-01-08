@@ -20,7 +20,6 @@ cmds=(
   'info:show global power parameters'
   'set:set global power parameters'
   'monitor:report frequency and idle statistics'
-  'powercap-info:show powercapping related kernel and hardware configurations'
   'help:print usage information'
 )
 case $state in
@@ -95,7 +94,7 @@ case $state in
           '-i+[measurement interval]:interval (seconds)'
           '-c[schedule on every core]'
           '-v[increase verbosity]'
-          '*:::command: _normal'
+          '*:::command: _normal -p $service'
         )
       ;;
     esac

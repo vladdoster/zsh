@@ -25,17 +25,22 @@
 # still not be good enough.  Maybe we should trick it somehow.
 emulate -R zsh
 
-# Ensure the locale does not screw up sorting.  Don't supply a locale
-# unless there's one set, to minimise problems.
-[[ -n $LC_ALL ]] && LC_ALL=C
-[[ -n $LC_CTYPE ]] && LC_CTYPE=C
-[[ -n $LC_COLLATE ]] && LC_COLLATE=C
-[[ -n $LC_NUMERIC ]] && LC_NUMERIC=C
-[[ -n $LC_MESSAGES ]] && LC_MESSAGES=C
-[[ -n $LANG ]] && LANG=C
-# Test file may (or may not) set LANG to other locales. In either case,
-# LANG must be passed to child zsh.
-export LANG
+# By default tests are run in C locale. LANG must be passed to child zsh.
+unset -m LC_\*
+export LANG=C
+
+# find UTF-8 locale
+ZTST_find_UTF8 () {
+  setopt multibyte
+  local langs=(en_{US,GB}.{UTF-,utf}8 en.UTF-8
+               ${(M)$(locale -a 2>/dev/null):#*.(utf8|UTF-8)})
+  for LANG in $langs; do
+    if [[ é = ? ]]; then
+      echo $LANG
+      return
+    fi
+  done
+}
 
 # Don't propagate variables that are set by default in the shell.
 typeset +x WORDCHARS
@@ -321,6 +326,7 @@ ZTST_diff() {
   emulate -L zsh
   setopt extendedglob
 
+  local -a diff_arg
   local diff_out
   integer diff_pat diff_ret
 
@@ -337,6 +343,7 @@ ZTST_diff() {
     ;;
   esac
   shift
+  [[ $OSTYPE != (aix|solaris)* ]] && diff_arg=( -a )
       
   if (( diff_pat )); then
     local -a diff_lines1 diff_lines2
@@ -377,7 +384,7 @@ ZTST_diff() {
       diff_ret=1
     fi
   else
-    diff_out=$(diff -a "$@")
+    diff_out=$(diff $diff_arg "$@")
     diff_ret="$?"
     if [[ "$diff_ret" != "0" ]]; then
       print -r -- "$diff_out"

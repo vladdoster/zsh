@@ -1,6 +1,6 @@
 #autoload
 
-local of ofwuc ouc oss ofwy ofwg ofwl cmd variant
+local of ofwuc ouc oss ofwy ofwg ofwl cmd variant ign
 local -a args
 
 cmd="$1"
@@ -25,7 +25,10 @@ _diff_palette() {
   return ret
 }
 
-if _pick_variant -r variant -c $cmd gnu=GNU unix -v || [[ $OSTYPE = freebsd<12->.* ]]; then
+if _pick_variant -r variant -c $cmd gnu=GNU unix -v ||
+  [[ $OSTYPE = (freebsd<12->|darwin<22->).* ]]; then
+  (( $#words > 2 )) && ign='!'
+
   # output formats
   of="-y --side-by-side -n --rcs -e -f --ed -q --brief -c -C --context -u -U \
   --unified --old-group-format --new-group-format --changed-group-format \
@@ -61,29 +64,28 @@ if _pick_variant -r variant -c $cmd gnu=GNU unix -v || [[ $OSTYPE = freebsd<12->
   --unchanged-group-format"
 
   if [[ $variant = gnu ]]; then
-    (( $#words > 2 )) || args+=(
-      '(-v --version)'{-v,--version}'[display version information]'
-      '--help[display usage information]'
-    )
     args+=(
       '(-H --speed-large-files)'{-H,--speed-large-files}'[assume large files and many small changes]'
       '(-E --ignore-tab-expansion)'{-E,--ignore-tab-expansion}'[ignore changes due to tab expansion]'
       '(-Z --ignore-trailing-space)'{-Z,--ignore-trailing-space}'[ignore white space at line end]'
-      "($ofwuc $oss -F --show-function-line)"{-F+,--show-function-line=}'[show the most recent line matching regex]:regex'
       "($ofwy $ouc)--left-column[output only left column of common lines]"
       "($ofwg $ouc $oss)--old-group-format=[set old group format]:old group format"
       "($ofwg $ouc $oss)--new-group-format=[set new group format]:new group format"
       "($ofwl $ouc $oss)--unchanged-line-format=[set unchanged line format]:unchanged line format"
-      '(--to-file)--from-file=[compare specified file to all operands]:from file:_files' \
-      '(--from-file)--to-file=[compare all operands to specified file]:to file:_files' \
-      '--color=-[use colors in output]::when [auto]:(never always auto)'
+      '(--to-file)--from-file=[compare specified file to all operands]:from file:_files'
+      '(--from-file)--to-file=[compare all operands to specified file]:to file:_files'
       '--palette=[specify colors to use]:color:_diff_palette'
+      "${ign}(1 2)-v[display version information]"
     )
   else
     args+=( '!--speed-large-files' )
+    if [[ $OSTYPE = darwin<22->.* ]]; then
+      args+=( '(-A --algorithm)'{-A+,--algorithm=}'[specify the algorithm to use]:algorithm:(myers patience stone)' )
+    fi
   fi
 
   _arguments -s $args \
+    '--color=-[use colors in output]::when [auto]:(never always auto)' \
     '(-i --ignore-case)'{-i,--ignore-case}'[case insensitive]' \
     '--ignore-file-name-case[ignore case when comparing file names]' \
     '!(--ignore-file-name-case)--no-ignore-file-name-case' \
@@ -99,6 +101,7 @@ if _pick_variant -r variant -c $cmd gnu=GNU unix -v || [[ $OSTYPE = freebsd<12->
     "($of $oss)-u[output a unified diff]" \
     "($ofwuc $oss)*"{-L+,--label=}'[set label to use instead of file name and timestamp]:label' \
     "($ofwuc $oss -p --show-c-function)"{-p,--show-c-function}'[show C function of each change]' \
+    "($ofwuc $oss -F --show-function-line)"{-F+,--show-function-line=}'[show the most recent line matching regex]:regex' \
     "($of $ouc $oss)"{-q,--brief}'[output only whether files differ]' \
     "($of $ouc $oss -e --ed)"{--ed,-e}'[output an ed script]' \
     "!($of $ouc $oss)--normal" \
@@ -127,39 +130,52 @@ if _pick_variant -r variant -c $cmd gnu=GNU unix -v || [[ $OSTYPE = freebsd<12->
     "($of $ouc)"{-y,--side-by-side}'[output in two columns]' \
     "($ofwy $ouc)--suppress-common-lines[don't output common lines]" \
     "($ofwy $ouc --width -W)"{--width=,-W+}'[set size of line]:number of characters per line' \
+    "${ign}(1 2)--version[display version information]" \
+    "${ign}(1 2)--help[display usage information]" \
     "$@"
 else
   of='-c -e -f'
   case $OSTYPE in
     openbsd*|solaris2.<9->)
       of+=' -u -U'
+    ;|
+    openbsd*|solaris*)
+      of+=' -n -C -D'
+    ;|
+    solaris*)
+      of+=' -h'
+    ;|
+    openbsd*)
+      of+=' -q'
+    ;|
+    # modifications to "$of" should be done above this line so that it is
+    # uniformly defined while constructing $args
+    openbsd*|solaris2.<9->)
       args+=(
-	"($of)-u[output a unified diff]"
-	"($of)-U+[output a unified diff]:lines of context"
+        "($of)-u[output a unified diff]"
+        "($of)-U+[output a unified diff]:lines of context"
       )
     ;|
     openbsd*|solaris*)
       args+=(
-	"($of)-C+[output a context diff]:lines of context"
-	"($of)-D+[output merged file with preprocessor directives]:preprocessor symbol"
-	'-i[case insensitive]'
-	'-l[long output format (paginate with pr(1))]'
-	'-s[report on identical files]'
-	'-t[expand tabs in output lines]'
+        "($of)-C+[output a context diff]:lines of context"
+        "($of)-D+[output merged file with preprocessor directives]:preprocessor symbol"
+        '-i[case insensitive]'
+        '-s[report on identical files]'
+        '-t[expand tabs in output lines]'
       )
     ;|
     solaris*)
-      of+=' -h -n'
       args+=(
-	'-w[ignore all white space]'
-	"($of)-h[do a fast, half-hearted job]"
-	"($of)-n[output a reversed ed script]"
+        '-w[ignore all white space]'
+        "($of)-h[do a fast, half-hearted job]"
+        "($of)-n[output a reversed ed script]"
         '-S+[set first file in comparison]:start with file:_files'
+        '-l[long output format (paginate with pr(1))]'
       )
     ;;
     openbsd*)
-      of+=' -n -q -u -C -D -U'
-      args=(
+      args+=(
         "($of)-n[output an rcsdiff(1)-compatible diff]"
         "($of)-q[only print a line when the files differ; does not produce a list of changes]"
         '-a[treat all files as ASCII text]'
@@ -173,7 +189,7 @@ else
         '-P[treat absent files in the second directory as if they were empty]'
         '-S[start a directory diff from a file name]:file name:_files'
         '*-X[exclude files and subdirectories whose basenames match lines in a file]:file name:_files'
-        '-x[exclude files and subdirectories whose basenames match a pattern]:pattern'
+        '*-x[exclude files and subdirectories whose basenames match a pattern]:pattern'
       )
     ;;
   esac

@@ -3,7 +3,7 @@
 local context state line
 local -a actions lsarg subcmds variables
 
-actions=(check reload restart start stop)
+actions=(configtest check reload restart start stop)
 subcmds=(disable enable get getdef ls order set)
 variables=(class flags status timeout user)
 lsarg=(
@@ -18,7 +18,8 @@ lsarg=(
 
 if [[ $service == "rcctl" ]]; then
   _arguments -C \
-    '-d[print debug information]' \
+    '(-q)-d[print debug information]' \
+    '(-d)-q[only display the script name and errors]' \
     '-f[forcibly start the daemon]' \
     ':subcommand:('"$actions ${${${+words[(r)-[df]]}#1}/0/$subcmds}"\) \
     '*:: :->subcmd' && return
@@ -46,6 +47,7 @@ case $service in
       '*:argument:'
     ;;
   ${(~j:|:)actions}|disable|enable)
-    _arguments "*:service to $words[2]:_services"
+    _arguments "*:service to ${words[2]}:_services"
     ;;
+  *) _default ;;
 esac

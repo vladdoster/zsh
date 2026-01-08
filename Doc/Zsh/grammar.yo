@@ -20,9 +20,7 @@ cindex(commands, simple)
 A em(simple command) is a sequence of optional parameter
 assignments followed by blank-separated words,
 with optional redirections interspersed.  For a description
-of assignment, see the beginning of
-ifnzman(noderef(Parameters))\
-ifzman(zmanref(zshparam)).
+of assignment, see the beginning of nmref(Parameters)(zshparam).
 
 The first word is the command to be executed, and the remaining
 words, if any, are arguments to the command.
@@ -100,14 +98,15 @@ More generally, a list can be seen as a set of any shell commands
 whatsoever, including the complex commands below; this is implied wherever
 the word `list' appears in later descriptions.  For example, the commands
 in a shell function form a special sort of list.
+
 texinode(Precommand Modifiers)(Complex Commands)(Simple Commands & Pipelines)(Shell Grammar)
 sect(Precommand Modifiers)
 cindex(precommand modifiers)
 cindex(modifiers, precommand)
-A simple command may be preceded by a em(precommand modifier),
-which will alter how the command is interpreted.  These modifiers are
-shell builtin commands with the exception of tt(nocorrect) which is
-a reserved word.
+With the exception of tt(nocorrect), which is a reserved word that
+affects further parsing when it is found in command position, each
+of the following builtin commands is a em(precommand modifier) which
+may precede a simple command to alter how that command is interpreted.
 
 startitem()
 findex(-)
@@ -158,8 +157,7 @@ before any parsing is done.  It has no effect in non-interactive shells.
 )
 findex(noglob)
 item(tt(noglob))(
-Filename generation (globbing) is not performed on any of
-the words.
+Filename generation (globbing) is not performed on any of the words.
 )
 enditem()
 texinode(Complex Commands)(Alternate Forms For Complex Commands)(Precommand Modifiers)(Shell Grammar)
@@ -187,6 +185,12 @@ Expand the list of var(word)s, and set the parameter
 var(name) to each of them in turn, executing var(list)
 each time.  If the `tt(in) var(word)' is omitted,
 use the positional parameters instead of the var(word)s.
+If any var(name) has been declared as a named reference,
+the corresponding var(word) is treated as the name of a
+parameter and var(name) is made a reference to that.
+Note that for the positional parameters, this treats the
+value of each positional as parameter name rather than
+creating a reference to the position.
 
 The var(term) consists of one or more newline or tt(;)
 which terminate the var(word)s, and are optional when the
@@ -203,7 +207,7 @@ in the list, else it will be treated as marking the end of the list.
 )
 item(tt(for LPAR()LPAR()) [var(expr1)] tt(;) [var(expr2)] tt(;) [var(expr3)] tt(RPAR()RPAR() do) var(list) tt(done))(
 The arithmetic expression var(expr1) is evaluated first (see
-noderef(Arithmetic Evaluation)).  The arithmetic expression
+sectref(Arithmetic Evaluation)(below)).  The arithmetic expression
 var(expr2) is repeatedly evaluated until it evaluates to zero and
 when non-zero, var(list) is executed and the arithmetic expression
 var(expr3) evaluated.  If any expression is omitted, then it behaves
@@ -242,7 +246,7 @@ item(tt(case) var(word) tt(in) [ [tt(LPAR())] var(pattern) [ tt(|) var(pattern) 
 Execute the var(list) associated with the first var(pattern)
 that matches var(word), if any.  The form of the patterns
 is the same as that used for filename generation.  See
-noderef(Filename Generation).
+sectref(Filename Generation)(zshexpn).
 
 Note further that, unless the tt(SH_GLOB) option is set, the whole
 pattern with alternatives is treated by the shell as equivalent to a
@@ -367,7 +371,7 @@ Define a function which is referenced by any one of var(word).
 Normally, only one var(word) is provided; multiple var(word)s
 are usually only useful for setting traps.
 The body of the function is the var(list) between
-the tt({) and tt(}).  See noderef(Functions).
+the tt({) and tt(}).  See sectref(Functions)(blow).
 
 The options of tt(function) have the following meanings:
 
@@ -375,8 +379,7 @@ startitem()
 item(-T)(
 Enable tracing for this function, as though with tt(functions -T).  See the
 documentation of the tt(-f) option to the tt(typeset) builtin, in
-ifzman(zmanref(zshbuiltins))\
-ifnzman(noderef(Shell Builtin Commands)).
+sectref(Shell Builtin Commands)(zshbuiltins).
 )
 enditem()
 
@@ -408,7 +411,7 @@ findex([[)
 item(tt([[) var(exp) tt(]]))(
 Evaluates the conditional expression var(exp)
 and return a zero exit status if it is true.
-See noderef(Conditional Expressions)
+See sectref(Conditional Expressions)(below)
 for a description of var(exp).
 )
 enditem()
@@ -536,7 +539,7 @@ itemiz(Errors creating command or process substitutions)
 itemiz(Syntax errors in glob qualifiers)
 itemiz(File generation errors where not caught by the option tt(BAD_PATTERN))
 itemiz(All bad patterns used for matching within case statements)
-itemiz(File generation failures where not caused by tt(NO_MATCH) or
+itemiz(File generation failures where not caused by tt(NOMATCH) or
 similar options)
 itemiz(All file generation errors where the pattern was used to create a
 multio)
@@ -622,7 +625,7 @@ by a character that isn't special, it may be more convenient to quote the
 word by starting with a single quote, i.e. tt('foo); completion will
 automatically add the trailing single quote.
 
-subsect(Alias difficulties)
+subsect(Alias Difficulties)
 
 Although aliases can be used in ways that bend normal shell syntax, not
 every string of non-white-space characters can be used as an alias.
@@ -630,8 +633,7 @@ every string of non-white-space characters can be used as an alias.
 Any set of characters not listed as a word above is not a word, hence no
 attempt is made to expand it as an alias, no matter how it is defined
 (i.e. via the builtin or the special parameter tt(aliases) described in
-ifnzman(noderef(The zsh/parameter Module))\
-ifzman(the section THE ZSH/PARAMETER MODULE in zmanref(zshmodules))).
+sectref(The zsh/parameter Module)(zshmodules)).
 However, as noted in the case of tt(POSIX_ALIASES) above, the shell does
 not attempt to deduce whether the string corresponds to a word at the
 time the alias is created.

@@ -556,7 +556,7 @@ multsub(char **s, int pf_flags, char ***a, int *isarr, char *sep,
 	for ( ; *x; x += l) {
 	    char c = (l = *x == Meta) ? x[1] ^ 32 : *x;
 	    l++;
-	    if (!iwsep(STOUC(c)))
+	    if (!iwsep((unsigned char) c))
 		break;
 	    *ms_flags |= MULTSUB_WS_AT_START;
 	}
@@ -573,7 +573,7 @@ multsub(char **s, int pf_flags, char ***a, int *isarr, char *sep,
 	    convchar_t c;
 	    if (*x == Dash)
 		*x = '-';
-	    if (itok(STOUC(*x))) {
+	    if (itok((unsigned char) *x)) {
 		/* token, can't be separator, must be single byte */
 		rawc = *x;
 		l = 1;
@@ -582,7 +582,7 @@ multsub(char **s, int pf_flags, char ***a, int *isarr, char *sep,
 		if (!inq && !inp && WC_ZISTYPE(c, ISEP)) {
 		    *x = '\0';
 		    for (x += l; *x; x += l) {
-			if (itok(STOUC(*x))) {
+			if (itok((unsigned char) *x)) {
 			    /* as above */
 			    rawc = *x;
 			    l = 1;
@@ -640,7 +640,7 @@ multsub(char **s, int pf_flags, char ***a, int *isarr, char *sep,
 	 * our caller (if they provided for that result). */
 	if (a && (l > 1 || foo.list.flags & LF_ARRAY)) {
 	    *a = r;
-	    *isarr = SCANPM_MATCHMANY;
+	    *isarr = 1;
 	    return 0;
 	}
 	*s = sepjoin(r, sep, 1);
@@ -1489,21 +1489,27 @@ subst_parse_str(char **sp, int single, int err)
 static char *
 substevalchar(char *ptr)
 {
-    zlong ires = mathevali(ptr);
+    zlong ires;
     int len = 0;
+    int saved_errflag = errflag;
 
-    if (errflag)
-	return NULL;
-#ifdef MULTIBYTE_SUPPORT
-    if (isset(MULTIBYTE) && ires > 127) {
-	/* '\\' + 'U' + 8 bytes of character + '\0' */
-	char buf[11];
+    errflag = 0;
+    ires = mathevali(ptr);
 
-	/* inefficient: should separate out \U handling from getkeystring */
-	sprintf(buf, "\\U%.8x", (unsigned int)ires & 0xFFFFFFFFu);
-	ptr = getkeystring(buf, &len, GETKEYS_BINDKEY, NULL);
+    if (errflag) {  /* not a valid numerical expression */
+	errflag |= saved_errflag;
+	return noerrs ? dupstring(""): NULL;
     }
-    if (len == 0)
+    errflag |= saved_errflag;
+    if (ires < 0) {
+	zerr("character not in range");
+    }
+#ifdef MULTIBYTE_SUPPORT
+    else if (isset(MULTIBYTE) && ires > 127) {
+	ptr = zhalloc(MB_CUR_MAX+1);
+	len = ucs4tomb((unsigned int)ires & 0xffffffff, ptr);
+    }
+    if (len <= 0)
 #endif
     {
 	ptr = zhalloc(2);
@@ -1620,6 +1626,7 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	   int *ret_flags)
 {
     char *aptr = *str, c, cc;
+    char *arr[2];
     char *s = aptr, *fstr, *idbeg, *idend, *ostr = (char *) getdata(n);
     int colf;			/* != 0 means we found a colon after the name */
     /*
@@ -1642,7 +1649,7 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
      * (I mean the one explicitly marked as such).  The value 2
      * indicates an array has come from splitting a scalar.  We use
      * that to override the usual rule that in double quotes we don't
-     * remove empty elements (so "${(s.:):-foo::bar}" produces two
+     * remove empty elements (so "${(s.:.):-foo::bar}" produces two
      * words).  This seems to me to be quite the wrong thing to do,
      * but it looks like code may be relying on it.  So we require (@)
      * as well before we keep the empty fields (look for assignments
@@ -1818,14 +1825,14 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
      * Use for the (k) flag.  Goes down into the parameter code,
      * sometimes.
      */
-    char hkeys = 0;
+    int hkeys = 0;
     /*
      * Used for the (v) flag, ditto.  Not quite sure why they're
      * separate, but the tradition seems to be that things only
      * get combined when that makes the result more obscure rather
      * than less.
      */
-    char hvals = 0;
+    int hvals = 0;
     /*
      * Whether we had to evaluate a subexpression, i.e. an
      * internal ${...} or $(...) or plain $pm.  We almost don't
@@ -1860,6 +1867,11 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
      * joining the array into a string (for compatibility with ksh/bash).
      */
     int quoted_array_with_offset = 0;
+    /*
+     * Nofork substitution controls
+     */
+    char *rplyvar = NULL;    /* Indicates ${|...;} or ${{var} ...;} */
+    char *rplytmp = NULL;    /* Indicates ${ ... ;} */
 
     *s++ = '\0';
     /*
@@ -1870,8 +1882,8 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
      * these later on, too.
      */
     c = *s;
-    if (itype_end(s, IIDENT, 1) == s && *s != '#' && c != Pound &&
-	!IS_DASH(c) &&
+    if (itype_end(s, (c == Inbrace ? INAMESPC : IIDENT), 1) == s &&
+	*s != '#' && c != Pound && !IS_DASH(c) &&
 	c != '!' && c != '$' && c != String && c != Qstring &&
 	c != '?' && c != Quest &&
 	c != '*' && c != Star && c != '@' && c != '{' &&
@@ -1887,19 +1899,235 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
      * flags in parentheses, but also one ksh hack.
      */
     if (c == Inbrace) {
-	inbrace = 1;
-	s++;
+	/* For processing nofork command substitution string */
+	char *cmdarg = NULL, *endvar = NULL, inchar = *++s;
+	char *outbracep = s, sav = *s;
+	Param rplypm = NULL;
+	size_t slen = 0;
+	int trim = (!EMULATION(EMULATE_ZSH)) ? 2 : !qt;
+
+	inbrace = 1;	/* Outer scope boolean, see above */
+
+        /* Handling for nofork command substitution e.g. ${|cmd;}
+	 * See other comments about kludges for why this is here.
+	 *
+         * The command string is extracted and executed, and the
+         * substitution assigned. There's no (...)-flags processing,
+         * i.e. no ${|(U)cmd;}, because it looks quite awful and
+         * should not be part of command substitution in any case.
+         * Use ${(U)${|cmd;}} as you would for ${(U)$(cmd;)}.
+	 */
+	if (inchar == '|' || inchar == Bar || inblank(inchar)) {
+	    *s = Inbrace;
+	    if (skipparens(Inbrace, Outbrace, &outbracep) == 0)
+		slen = outbracep - s - 1;
+	    *s = sav;
+	    if (inchar == '|')
+		inchar = Bar;	/* Simplify later compares */
+	} else if (inchar == '{' || inchar == Inbrace) {
+	    *s = Inbrace;
+	    if ((outbracep = itype_end(s+1, INAMESPC, 0))) {
+		if (*outbracep == Inbrack &&
+		    (outbracep = parse_subscript(++outbracep, 1, ']')))
+		    ++outbracep;
+	    }
+
+	    /* If we reached the first close brace, find the last */
+	    if (outbracep && *outbracep == Outbrace) {
+		char outchar = inchar == Inbrace ? Outbrace : '}';
+		endvar = outbracep++;
+
+		/* Require space to avoid ${{var}} typo for ${${var}} */
+		if (!inblank(*outbracep)) {
+		    zerr("bad substitution");
+		    return NULL;
+		}
+
+		*endvar = '|';	/* Almost anything but braces/brackets */
+		outbracep = s;
+		if (skipparens(Inbrace, outchar, &outbracep) == 0)
+		    *endvar = Outbrace;
+		else {	/* Never happens? */
+		    *endvar = outchar;
+		    outbracep = endvar + 1;
+		}
+		slen = outbracep - s - 1;
+		if (inchar != Inbrace)
+		    outbracep[-1] = Outbrace;
+		*s = sav;
+		inchar = Inbrace;	/* Simplify later compares */
+	    } else {
+		zerr("bad substitution");
+		return NULL;
+	    }
+	}
+	if (slen > 1) {
+	    char *outbracep = s + slen;
+	    if (!itok(*s) || inblank(inchar)) {
+		/* This tokenize() is important */
+		char sav = *outbracep;
+		*outbracep = '\0';
+		tokenize(s);
+		*outbracep = sav;
+	    }
+	    if (*outbracep == Outbrace) {
+		if (endvar == s+1) {
+		    /* For consistency with ${} we allow ${{}...} */
+		    rplyvar = NULL;
+		}
+		if (endvar && *endvar == Outbrace) {
+		    cmdarg = dupstrpfx(endvar+1, outbracep-endvar-1);
+		    rplyvar = dupstrpfx(s+1,endvar-s-1);
+		} else {
+		    cmdarg = dupstrpfx(s+1, outbracep-s-1);
+		    rplyvar = "REPLY";
+		}
+		if (inblank(inchar)) {
+		    /*
+		     * Admittedly a hack.  Take advantage of the added
+		     * parameter scope and the semantics of $(<file) to
+		     * construct a command to write/read a temporary file.
+		     * Then fall through to the regular parameter handling
+		     * to manage word splitting, expansion flags, etc.
+		     */
+		    char *outfmt = ">| %s {\n%s\n;}";	/* 13 */
+		    if ((rplytmp = gettempname(NULL, 1))) {
+			/* Prevent shenanigans with $TMPPREFIX */
+			char *tmpfile = quotestring(rplytmp, QT_BACKSLASH);
+			char *dummy = zhalloc(strlen(cmdarg) +
+					      strlen(tmpfile) +
+					      13);
+			sprintf(dummy, outfmt, tmpfile, cmdarg);
+			cmdarg = dummy;
+		    } else {
+			/* TMPPREFIX not writable? */
+			cmdoutval = lastval;
+			cmdarg = NULL;
+		    }
+		}
+		s = outbracep;
+	    }
+	}
+
+	if (rplyvar) {
+	    /* char *rplyval = getsparam("REPLY");  cf. Future? below */
+	    startparamscope(); /* "local" behaves as if in a function */
+	    if (inchar == Bar) {
+		/* rplyvar should be REPLY at this point, but create
+		 * hardwired name anyway to expose any bugs elsewhere
+		 */
+		rplypm = createparam("REPLY", PM_LOCAL|PM_UNSET|PM_HIDE);
+		if (rplypm)	/* Shouldn't createparam() do this? */
+		    rplypm->level = locallevel;
+		/* Future?  Expose global value of $REPLY if any? */
+		/* if (rplyval) setsparam("REPLY", ztrdup(rplyval)); */
+	    } else if (inblank(inchar)) {
+		rplypm = createparam((rplyvar = ".zsh.cmdsubst"),
+				     PM_LOCAL|PM_UNSET|PM_HIDE|
+				     PM_READONLY_SPECIAL);
+		if (rplypm)
+		    rplypm->level = locallevel;
+	    }
+	    if (inchar != Inbrace && !rplypm) {
+		zerr("failed to create scope for command substitution");
+		return NULL;
+	    }
+	}
+
+	if (rplyvar && cmdarg && *cmdarg) {
+	    int obreaks = breaks;
+	    Eprog cmdprog;
+	    /* Execute the shell command */
+	    queue_signals();
+	    untokenize(cmdarg);
+	    cmdprog = parse_string(cmdarg, 0);
+	    if (cmdprog) {
+		/* exec.c handles dont_queue_signals() */
+		execode(cmdprog, 1, 0, "cmdsubst");
+		cmdoutval = lastval;
+		/* "return" behaves as if in a function */
+		if (retflag) {
+		    retflag = 0;
+		    breaks = obreaks;	/* Is this ever not zero? */
+		}
+	    } else	/* parse error */
+		errflag |= ERRFLAG_ERROR;
+	    if (rplypm)
+		rplypm->node.flags &= ~PM_READONLY_SPECIAL;
+	    if (rplytmp && !errflag) {
+		int onoerrs = noerrs, rplylen;
+		noerrs = 2;
+		rplylen = zstuff(&cmdarg, rplytmp);
+		if (trim) {
+		    /* bash and ksh strip trailing newlines here */
+		    while (rplylen > 0 && cmdarg[rplylen-1] == '\n') {
+			rplylen--;
+			if (trim == 1)
+			    break;
+		    }
+		    cmdarg[rplylen] = 0;
+		}
+		noerrs = onoerrs;
+		if (rplylen >= 0)
+		    setsparam(rplyvar, metafy(cmdarg, rplylen, META_REALLOC));
+	    }
+	    unqueue_signals();
+	}
+
+	if (rplytmp)
+	    unlink(rplytmp);
+	if (rplyvar) {
+	    if (inchar != Inbrace) {
+		if ((val = dupstring(getsparam(rplyvar))))
+		    vunset = 0;
+		else {
+		    vunset = 1;
+		    val = dupstring("");
+		}
+	    } else {
+		s = dyncat(rplyvar, s);
+		rplyvar = NULL;
+	    }
+	    endparamscope();
+	    if (exit_pending) {
+		if (mypid == getpid()) {
+		    /*
+		     * paranoia: don't check for jobs, but there
+		     * shouldn't be any if not interactive.
+		     */
+		    stopmsg = 1;
+		    zexit(exit_val, ZEXIT_NORMAL);
+		} else
+		    _exit(exit_val);
+	    }
+	}
+
 	/*
 	 * In ksh emulation a leading `!' is a special flag working
-	 * sort of like our (k).
+	 * sort of like our (k).  This is true only for arrays or
+	 * associative arrays and only with subscripts [*] or [@],
+	 * so zsh's implementation is approximate.  For namerefs
+	 * in ksh, ${!ref} substitues the parameter name at the
+	 * end of any chain of references, rather than the value.
+	 *
 	 * TODO: this is one of very few cases tied directly to
 	 * the emulation mode rather than an option.  Since ksh
 	 * doesn't have parameter flags it might be neater to
 	 * handle this with the ^, =, ~ stuff, below.
 	 */
 	if ((c = *s) == '!' && s[1] != Outbrace && EMULATION(EMULATE_KSH)) {
-	    hkeys = SCANPM_WANTKEYS;
+	    hkeys = SCANPM_WANTKEYS|SCANPM_NONAMEREF;
 	    s++;
+	    /* There's a slew of other special bash meanings of parameter
+	     * references that start with "!":
+	     *  ${!name} == ${(P)name} (when name is not a nameref)
+	     *  ${!name*} == ${(k)parameters[(I)name*]}
+	     *  ${!name@} == ${(@k)parameters[(I)name*]}
+	     *  ${!name[*]} == ${(k)name} (but indexes of ordinary arrays, too)
+	     *  ${!name[@]} == ${(@k)name} (ditto, as noted above for ksh)
+	     *
+	     * See also workers/34390, workers/34397, workers/34408.
+	     */
 	} else if (c == '(' || c == Inpar) {
 	    char *t, sav;
 	    int tt = 0;
@@ -2154,10 +2382,19 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 		    escapes = 1;
 		    break;
 
+		case '!':
+		    if ((hkeys|hvals) & ~SCANPM_NONAMEREF)
+			goto flagerr;
+		    hkeys = SCANPM_NONAMEREF;
+		    break;
 		case 'k':
+		    if (hkeys & ~SCANPM_WANTKEYS)
+			goto flagerr;
 		    hkeys = SCANPM_WANTKEYS;
 		    break;
 		case 'v':
+		    if (hvals & ~SCANPM_WANTVALS)
+			goto flagerr;
 		    hvals = SCANPM_WANTVALS;
 		    break;
 
@@ -2308,7 +2545,7 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
     /*
      * Look for special unparenthesised flags.
      * TODO: could make these able to appear inside parentheses, too,
-     * i.e. ${(^)...} etc.
+     * i.e. ${(^)...} etc., but ${(~)...} already has another meaning.
      */
     for (;;) {
 	if ((c = *s) == '^' || c == Hat) {
@@ -2332,7 +2569,7 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	    }
 	} else if ((c == '#' || c == Pound) &&
 		   (inbrace || !isset(POSIXIDENTIFIERS)) &&
-		   (itype_end(s+1, IIDENT, 0) != s + 1
+		   (itype_end(s+1, INAMESPC, 0) != s + 1
 		    || (cc = s[1]) == '*' || cc == Star || cc == '@'
 		    || cc == '?' || cc == Quest
 		    || cc == '$' || cc == String || cc == Qstring
@@ -2369,8 +2606,9 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	     * Try to handle this when parameter is named
 	     * by (P) (second part of test).
 	     */
-	    if (itype_end(s+1, IIDENT, 0) != s+1 || (aspar && isstring(s[1]) &&
-				 (s[2] == Inbrace || s[2] == Inpar)))
+	    if (itype_end(s+1, INAMESPC, 0) != s+1 ||
+		(aspar && isstring(s[1]) &&
+		 (s[2] == Inbrace || s[2] == Inpar)))
 		chkset = 1, s++;
 	    else if (!inbrace) {
 		/* Special case for `$+' on its own --- leave unmodified */
@@ -2531,6 +2769,8 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	    scanflags |= SCANPM_DQUOTED;
 	if (chkset)
 	    scanflags |= SCANPM_CHECKING;
+	if (!inbrace)
+	    scanflags |= SCANPM_NONAMESPC;
 	/*
 	 * Second argument: decide whether to use the subexpression or
 	 *   the string next on the line as the parameter name.
@@ -2556,14 +2796,14 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	 * we let fetchvalue set the main string pointer s to
 	 * the end of the bit it's fetched.
 	 */
-	if (!(v = fetchvalue(&vbuf, (subexp ? &ov : &s),
-			     (wantt ? -1 :
-			      ((unset(KSHARRAYS) || inbrace) ? 1 : -1)),
-			     scanflags)) ||
-	    (v->pm && (v->pm->node.flags & PM_UNSET)) ||
-	    (v->flags & VALFLAG_EMPTY))
+	if (!rplyvar &&
+	    (!(v = fetchvalue(&vbuf, (subexp ? &ov : &s),
+			      (wantt ? -1 :
+			       ((unset(KSHARRAYS) || inbrace) ? 1 : -1)),
+			      scanflags)) ||
+	     (v->pm && (v->pm->node.flags & PM_UNSET)) ||
+	     (v->valflags & VALFLAG_EMPTY)))
 	    vunset = 1;
-
 	if (wantt) {
 	    /*
 	     * Handle the (t) flag: value now becomes the type
@@ -2573,13 +2813,14 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 			       !(v->pm->node.flags & PM_UNSET))) {
 		int f = v->pm->node.flags;
 
-		switch (PM_TYPE(f)) {
+		switch (PM_TYPE(f)|(f & PM_NAMEREF)) {
 		case PM_SCALAR:  val = "scalar"; break;
 		case PM_ARRAY:   val = "array"; break;
 		case PM_INTEGER: val = "integer"; break;
 		case PM_EFLOAT:
 		case PM_FFLOAT:  val = "float"; break;
 		case PM_HASHED:  val = "association"; break;
+		case PM_NAMEREF: val = "nameref"; break;
 		}
 		val = dupstring(val);
 		if (v->pm->level)
@@ -2652,7 +2893,7 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	    else
 		pm->u.str = val;
 	    v = (Value) hcalloc(sizeof *v);
-	    v->isarr = isarr;
+	    v->scanflags = isarr ? SCANPM_ARRONLY : 0;
 	    v->pm = pm;
 	    v->end = -1;
 	    if (getindex(&s, v, qt ? SCANPM_DQUOTED : 0) || s == os)
@@ -2664,21 +2905,22 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	 * array (aval) value.  TODO: move val and aval into
 	 * a structure with a discriminator.  Hope we can make
 	 * more things array values at this point and dearrayify later.
-	 * v->isarr tells us whether the stuff from down below looks
+	 * v->scanflags tells us whether the stuff from down below looks
 	 * like an array.
 	 *
 	 * I think we get to discard the existing value of isarr
 	 * here because it's already been taken account of, either
 	 * in the subexp stuff or immediately above.
 	 */
-	if ((isarr = v->isarr)) {
+	if ((isarr =
+	     (v->scanflags & SCANPM_ISVAR_AT) ? -1 : v->scanflags ? 1 : 0)) {
 	    /*
-	     * No way to get here with v->flags & VALFLAG_INV, so
+	     * No way to get here with v->valflags & VALFLAG_INV, so
 	     * getvaluearr() is called by getarrvalue(); needn't test
 	     * PM_HASHED.
 	     */
-	    if (v->isarr == SCANPM_WANTINDEX) {
-		isarr = v->isarr = 0;
+	    if (v->scanflags == SCANPM_WANTINDEX) {
+		isarr = v->scanflags = 0;
 		val = dupstring(v->pm->node.nam);
 	    } else
 		aval = getarrvalue(v);
@@ -2701,9 +2943,9 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 
 		if (v->start < 0) {
 		    tmplen = arrlen(v->pm->gsu.a->getfn(v->pm));
-		    v->start += tmplen + ((v->flags & VALFLAG_INV) ? 1 : 0);
+		    v->start += tmplen + ((v->valflags & VALFLAG_INV) ? 1 : 0);
 		}
-		if (!(v->flags & VALFLAG_INV))
+		if (!(v->valflags & VALFLAG_INV))
 		    if (v->start < 0 ||
 			(tmplen != -1
 			 ? v->start >= tmplen
@@ -2719,7 +2961,7 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 		 * if we allow them to applied on every call, so
 		 * set the flag that allows them to be substituted.
 		 */
-		v->flags |= VALFLAG_SUBST;
+		v->valflags |= VALFLAG_SUBST;
 		val = getstrvalue(v);
 	    }
 	}
@@ -2769,8 +3011,8 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
      * substitution is in quotes) always good enough?  Potentially
      * we may be OK by now --- all potential `@'s and subexpressions
      * have been handled, including any [@] index which comes up
-     * by virtue of v->isarr being set to SCANPM_ISVAR_AT which
-     * is now in isarr.
+     * by virtue of v->scanflags being set to SCANPM_ISVAR_AT which
+     * is now in isarr being set to -1.
      *
      * However, if we are replacing multsub() with something that
      * doesn't mangle arrays, we may need to delay this step until after
@@ -2910,6 +3152,13 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 			chuck(ptr);
 		    else
 			ptr++;
+		} else if (c == Dnull) {
+		    chuck(ptr);
+		    while (*ptr && *ptr != c)
+			ptr++;
+		    if (*ptr == Dnull)
+			chuck(ptr);
+		    ptr--;	/* Outer loop is about to increment */
 		}
 	    }
 	    replstr = (*ptr && ptr[1]) ? ptr+1 : "";
@@ -2926,6 +3175,9 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	 */
 	if (!(flags & (SUB_MATCH|SUB_REST|SUB_BIND|SUB_EIND|SUB_LEN)))
 	    flags |= SUB_REST;
+	/* If matching at start and end, don't stop early */
+	if ((flags & (SUB_START|SUB_END)) == (SUB_START|SUB_END))
+	    flags |= SUB_LONG;
 
 	/*
 	 * With ":" treat a value as unset if the variable is set but
@@ -3016,7 +3268,7 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 		}
 		if (arrasg) {
 		    /* This is an array assignment. */
-		    char *arr[2], **t, **a, **p;
+		    char **t, **a, **p;
 		    if (spsep || spbreak) {
 			aval = sepsplit(val, spsep, 0, 1);
 			isarr = nojoin ? 1 : 2;
@@ -3076,7 +3328,13 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	    if (vunset) {
                 if (isset(EXECOPT)) {
                     *idend = '\0';
-                    zerr("%s: %s", idbeg, *s ? s : "parameter not set");
+		    if (*s){
+			int l;
+			singsub(&s);
+			s = unmetafy(s, &l);
+			zerr("%s: %l", idbeg, s, l);
+		    } else
+			zerr("%s: %s", idbeg, "parameter not set");
                     /*
                      * In interactive shell we need to return to
                      * top-level prompt --- don't clear this error
@@ -3203,7 +3461,7 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	    shortest = 0;
 	    ++s;
 	}
-	if (*itype_end(s, IIDENT, 0)) {
+	if (*itype_end(s, INAMESPC, 0)) {
 	    untokenize(s);
 	    zerr("not an identifier: %s", s);
 	    return NULL;
@@ -3218,6 +3476,9 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	} else {
 	    char *sval;
 	    zip = getaparam(s);
+	    if (!zip) {
+		zip = gethparam(s);
+	    }
 	    if (!zip) {
 		sval = getsparam(s);
 		if (sval)
@@ -3263,7 +3524,7 @@ paramsubst(LinkList l, LinkNode n, char **str, int qt, int pf_flags,
 	int intersect = (*s == '*' || *s == Star);
 	char **compare, **ap, **apsrc;
 	++s;
-	if (*itype_end(s, IIDENT, 0)) {
+	if (*itype_end(s, INAMESPC, 0)) {
 	    untokenize(s);
 	    zerr("not an identifier: %s", s);
 	    return NULL;
@@ -3716,6 +3977,8 @@ colonsubscript:
     if (presc) {
 	int ops = opts[PROMPTSUBST], opb = opts[PROMPTBANG];
 	int opp = opts[PROMPTPERCENT];
+	zattr savecurrent = txtcurrentattrs;
+	zattr saveunknown = txtunknownattrs;
 
 	if (presc < 2) {
 	    opts[PROMPTPERCENT] = 1;
@@ -3738,6 +4001,7 @@ colonsubscript:
 	    for (; *ap; ap++) {
 		char *tmps;
 		untokenize(*ap);
+		txtunknownattrs = TXT_ATTR_ALL;
 		tmps = promptexpand(*ap, 0, NULL, NULL, NULL);
 		*ap = dupstring(tmps);
 		free(tmps);
@@ -3747,10 +4011,14 @@ colonsubscript:
 	    if (!copied)
 		val = dupstring(val), copied = 1;
 	    untokenize(val);
+	    txtunknownattrs = TXT_ATTR_ALL;
 	    tmps = promptexpand(val, 0, NULL, NULL, NULL);
 	    val = dupstring(tmps);
 	    free(tmps);
 	}
+
+	txtpendingattrs = txtcurrentattrs = savecurrent;
+	txtunknownattrs = saveunknown;
 	opts[PROMPTSUBST] = ops;
 	opts[PROMPTBANG] = opb;
 	opts[PROMPTPERCENT] = opp;
@@ -4309,6 +4577,8 @@ modify(char **str, char **ptr, int inbrace)
 		break;
 
 	    case 's':
+	    case 'S':
+		hsubpatopt = (**ptr == 'S');
 		c = **ptr;
 		(*ptr)++;
 		ptr1 = *ptr;
@@ -4403,7 +4673,7 @@ modify(char **str, char **ptr, int inbrace)
 		break;
 
 	    case '&':
-		c = 's';
+		c = hsubpatopt ? 'S' : 's';
 		break;
 
 	    case 'g':
@@ -4492,8 +4762,11 @@ modify(char **str, char **ptr, int inbrace)
 			copy = casemodify(tt, CASMOD_UPPER);
 			break;
 		    case 's':
+		    case 'S':
+			hsubpatopt = (c == 'S');
 			if (hsubl && hsubr)
-			    subst(&copy, hsubl, hsubr, gbal);
+			    subst(&copy, dupstring(hsubl), dupstring(hsubr),
+				  gbal, hsubpatopt);
 			break;
 		    case 'q':
 			copy = quotestring(copy, QT_BACKSLASH_SHOWNULL);
@@ -4578,8 +4851,11 @@ modify(char **str, char **ptr, int inbrace)
 		    *str = casemodify(*str, CASMOD_UPPER);
 		    break;
 		case 's':
+		case 'S':
+		    hsubpatopt = (c == 'S');
 		    if (hsubl && hsubr)
-			subst(str, hsubl, hsubr, gbal);
+			subst(str, dupstring(hsubl), dupstring(hsubr),
+			      gbal, hsubpatopt);
 		    break;
 		case 'q':
 		    *str = quotestring(*str, QT_BACKSLASH);

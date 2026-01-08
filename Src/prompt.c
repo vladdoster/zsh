@@ -30,10 +30,25 @@
 #include "zsh.mdh"
 #include "prompt.pro"
 
-/* text attribute mask */
+/* current text attributes */
 
 /**/
-mod_export zattr txtattrmask;
+mod_export zattr txtcurrentattrs;
+
+/* pending changes for attributes */
+
+/**/
+mod_export zattr txtpendingattrs;
+
+/* mask of attributes with an unknown state */
+
+/**/
+mod_export zattr txtunknownattrs;
+
+/* detected default attributes for the terminal if any */
+
+/**/
+mod_export zattr memo_term_color;
 
 /* the command stack for use with %_ in prompts */
 
@@ -160,15 +175,11 @@ promptpath(char *p, int npath, int tilde)
  * between spacing and non-spacing parts of the prompt, and
  * Nularg, which (in a non-spacing sequence) indicates a
  * `glitch' space.
- *
- * txtchangep gives an integer controlling the attributes of
- * the prompt.  This is for use in zle to maintain the attributes
- * consistently.  Other parts of the shell should not need to use it.
  */
 
 /**/
 mod_export char *
-promptexpand(char *s, int ns, char *rs, char *Rs, zattr *txtchangep)
+promptexpand(char *s, int ns, const char *marker, char *rs, char *Rs)
 {
     struct buf_vars new_vars;
 
@@ -212,7 +223,12 @@ promptexpand(char *s, int ns, char *rs, char *Rs, zattr *txtchangep)
     new_vars.bp1 = NULL;
     new_vars.truncwidth = 0;
 
-    putpromptchar(1, '\0', txtchangep);
+    if (marker && *s) {
+	*new_vars.bp++ = Inpar;
+	strucpy(&new_vars.bp, (char *) marker);
+	*new_vars.bp++ = Outpar;
+    }
+    putpromptchar(1, '\0');
     addbufspc(2);
     if (new_vars.dontcount)
 	*new_vars.bp++ = Outpar;
@@ -233,6 +249,68 @@ promptexpand(char *s, int ns, char *rs, char *Rs, zattr *txtchangep)
     bv = new_vars.last;
 
     return new_vars.buf;
+}
+
+/* Get the escape sequence for a given attribute. */
+/**/
+mod_export char *
+zattrescape(zattr atr, int *len)
+{
+    struct buf_vars new_vars;
+    zattr savecurrent = txtcurrentattrs;
+    zattr saveunknown = txtunknownattrs;
+
+    memset(&new_vars, 0, sizeof(new_vars));
+    new_vars.last = bv;
+    bv = &new_vars;
+    new_vars.bufspc = 256;
+    new_vars.bp = new_vars.bufline = new_vars.buf = zshcalloc(new_vars.bufspc);
+    new_vars.dontcount = 1;
+
+    txtunknownattrs = 0;
+    treplaceattrs(atr);
+    applytextattributes(TSC_PROMPT);
+
+    bv = new_vars.last;
+
+    txtpendingattrs = txtcurrentattrs = savecurrent;
+    txtunknownattrs = saveunknown;
+
+    return unmetafy(new_vars.buf, len);
+}
+
+/* Parse the argument for %H */
+/**/
+mod_export char *
+parsehighlight(char *arg, char endchar, zattr *atr, zattr *mask)
+{
+    static int entered = 0;
+    char *var = ".zle.hlgroups";
+    struct value vbuf;
+    Value v;
+    char *ep, *attrs;
+    if ((ep = strchr(arg, endchar)))
+	*ep = '\0';
+    if (!entered && (v = getvalue(&vbuf, &var, 0)) &&
+	    PM_TYPE(v->pm->node.flags) == PM_HASHED)
+    {
+	Param node;
+	HashTable ht = v->pm->gsu.h->getfn(v->pm);
+	if (ht && (node = (Param) ht->getnode(ht, arg))) {
+	    attrs = node->gsu.s->getfn(node);
+	    entered = 1;
+	    if (match_highlight(attrs, atr, mask, NULL) == attrs)
+		*atr = TXT_ERROR;
+	} else
+	    *atr = TXT_ERROR;
+    } else
+	*atr = TXT_ERROR;
+    if (ep)
+	*ep++ = endchar;
+    else
+	ep = strchr(arg, '\0');
+    entered = 0;
+    return ep;
 }
 
 /* Parse the argument for %F and %K */
@@ -278,7 +356,7 @@ parsecolorchar(zattr arg, int is_fg)
 
 /**/
 static int
-putpromptchar(int doprint, int endchar, zattr *txtchangep)
+putpromptchar(int doprint, int endchar)
 {
     char *ss, *hostnam;
     int t0, arg, test, sep, j, numjobs, len;
@@ -401,7 +479,7 @@ putpromptchar(int doprint, int endchar, zattr *txtchangep)
 			test = 1;
 		    break;
 		case 'S':
-		    if (time(NULL) - shtimer.tv_sec >= arg)
+		    if (zmonotime(NULL) - shtimer.tv_sec >= arg)
 			test = 1;
 		    break;
 		case 'v':
@@ -430,10 +508,9 @@ putpromptchar(int doprint, int endchar, zattr *txtchangep)
 		/* Don't do the current truncation until we get back */
 		otruncwidth = bv->truncwidth;
 		bv->truncwidth = 0;
-		if (!putpromptchar(test == 1 && doprint, sep,
-				   txtchangep) || !*++bv->fm ||
-		    !putpromptchar(test == 0 && doprint, ')',
-				   txtchangep)) {
+		if (!putpromptchar(test == 1 && doprint, sep) ||
+				   !*++bv->fm ||
+		    !putpromptchar(test == 0 && doprint, ')')) {
 		    bv->truncwidth = otruncwidth;
 		    return 0;
 		}
@@ -488,8 +565,7 @@ putpromptchar(int doprint, int endchar, zattr *txtchangep)
 		    if (jobtab[j].stat && jobtab[j].procs &&
 		    	!(jobtab[j].stat & STAT_NOPRINT)) numjobs++;
 		addbufspc(DIGBUFSIZE);
-		sprintf(bv->bp, "%d", numjobs);
-		bv->bp += strlen(bv->bp);
+		bv->bp += sprintf(bv->bp, "%d", numjobs);
 		break;
 	    case 'M':
 		queue_signals();
@@ -519,71 +595,69 @@ putpromptchar(int doprint, int endchar, zattr *txtchangep)
 		unqueue_signals();
 		break;
 	    case 'S':
-		txtchangeset(txtchangep, TXTSTANDOUT, TXTNOSTANDOUT);
-		txtset(TXTSTANDOUT);
-		tsetcap(TCSTANDOUTBEG, TSC_PROMPT);
+		tsetattrs(TXTSTANDOUT);
+	        applytextattributes(TSC_PROMPT);
 		break;
 	    case 's':
-		txtchangeset(txtchangep, TXTNOSTANDOUT, TXTSTANDOUT);
-		txtunset(TXTSTANDOUT);
-		tsetcap(TCSTANDOUTEND, TSC_PROMPT|TSC_DIRTY);
+		tunsetattrs(TXTSTANDOUT);
+	        applytextattributes(TSC_PROMPT);
 		break;
 	    case 'B':
-		txtchangeset(txtchangep, TXTBOLDFACE, TXTNOBOLDFACE);
-		txtset(TXTBOLDFACE);
-		tsetcap(TCBOLDFACEBEG, TSC_PROMPT|TSC_DIRTY);
+		tsetattrs(TXTBOLDFACE);
+	        applytextattributes(TSC_PROMPT);
 		break;
 	    case 'b':
-		txtchangeset(txtchangep, TXTNOBOLDFACE, TXTBOLDFACE);
-		txtunset(TXTBOLDFACE);
-		tsetcap(TCALLATTRSOFF, TSC_PROMPT|TSC_DIRTY);
+		tunsetattrs(TXTBOLDFACE);
+	        applytextattributes(TSC_PROMPT);
 		break;
 	    case 'U':
-		txtchangeset(txtchangep, TXTUNDERLINE, TXTNOUNDERLINE);
-		txtset(TXTUNDERLINE);
-		tsetcap(TCUNDERLINEBEG, TSC_PROMPT);
+		tsetattrs(TXTUNDERLINE);
+	        applytextattributes(TSC_PROMPT);
 		break;
 	    case 'u':
-		txtchangeset(txtchangep, TXTNOUNDERLINE, TXTUNDERLINE);
-		txtunset(TXTUNDERLINE);
-		tsetcap(TCUNDERLINEEND, TSC_PROMPT|TSC_DIRTY);
+		tunsetattrs(TXTUNDERLINE);
+	        applytextattributes(TSC_PROMPT);
 		break;
 	    case 'F':
 		atr = parsecolorchar(arg, 1);
-		if (!(atr & (TXT_ERROR | TXTNOFGCOLOUR))) {
-		    txtchangeset(txtchangep, atr & TXT_ATTR_FG_ON_MASK,
-				 TXTNOFGCOLOUR | TXT_ATTR_FG_COL_MASK);
-		    txtunset(TXT_ATTR_FG_COL_MASK);
-		    txtset(atr & TXT_ATTR_FG_ON_MASK);
-		    set_colour_attribute(atr, COL_SEQ_FG, TSC_PROMPT);
+		if (atr && atr != TXT_ERROR) {
+		    tsetattrs(atr);
+		    applytextattributes(TSC_PROMPT);
 		    break;
 		}
 		/* else FALLTHROUGH */
 	    case 'f':
-		txtchangeset(txtchangep, TXTNOFGCOLOUR, TXT_ATTR_FG_ON_MASK);
-		txtunset(TXT_ATTR_FG_ON_MASK);
-		set_colour_attribute(TXTNOFGCOLOUR, COL_SEQ_FG, TSC_PROMPT);
+		tunsetattrs(TXTFGCOLOUR);
+		applytextattributes(TSC_PROMPT);
 		break;
 	    case 'K':
 		atr = parsecolorchar(arg, 0);
-		if (!(atr & (TXT_ERROR | TXTNOBGCOLOUR))) {
-		    txtchangeset(txtchangep, atr & TXT_ATTR_BG_ON_MASK,
-				 TXTNOBGCOLOUR | TXT_ATTR_BG_COL_MASK);
-		    txtunset(TXT_ATTR_BG_COL_MASK);
-		    txtset(atr & TXT_ATTR_BG_ON_MASK);
-		    set_colour_attribute(atr, COL_SEQ_BG, TSC_PROMPT);
+		if (atr && atr != TXT_ERROR) {
+		    tsetattrs(atr);
+		    applytextattributes(TSC_PROMPT);
 		    break;
 		}
 		/* else FALLTHROUGH */
 	    case 'k':
-		txtchangeset(txtchangep, TXTNOBGCOLOUR, TXT_ATTR_BG_ON_MASK);
-		txtunset(TXT_ATTR_BG_ON_MASK);
-		set_colour_attribute(TXTNOBGCOLOUR, COL_SEQ_BG, TSC_PROMPT);
+		tunsetattrs(TXTBGCOLOUR);
+	        applytextattributes(TSC_PROMPT);
+		break;
+	    case 'H':
+		if (bv->fm[1] == '{') {
+		    bv->fm = parsehighlight(bv->fm + 2, '}', &atr, NULL);
+		    --bv->fm;
+		} else {
+		    atr = 0;
+		}
+		if (atr != TXT_ERROR) {
+		    treplaceattrs(atr);
+		    applytextattributes(TSC_PROMPT);
+		}
 		break;
 	    case '[':
 		if (idigit(*++bv->fm))
 		    arg = zstrtol(bv->fm, &bv->fm, 10);
-		if (!prompttrunc(arg, ']', doprint, endchar, txtchangep))
+		if (!prompttrunc(arg, ']', doprint, endchar))
 		    return *bv->fm;
 		break;
 	    case '<':
@@ -596,7 +670,7 @@ putpromptchar(int doprint, int endchar, zattr *txtchangep)
 		    if (arg <= 0)
 			arg = 1;
 		}
-		if (!prompttrunc(arg, *bv->fm, doprint, endchar, txtchangep))
+		if (!prompttrunc(arg, *bv->fm, doprint, endchar))
 		    return *bv->fm;
 		break;
 	    case '{': /*}*/
@@ -719,20 +793,18 @@ putpromptchar(int doprint, int endchar, zattr *txtchangep)
 	    case 'L':
 		addbufspc(DIGBUFSIZE);
 #if defined(ZLONG_IS_LONG_LONG) && defined(PRINTF_HAS_LLD)
-		sprintf(bv->bp, "%lld", shlvl);
+		bv->bp += sprintf(bv->bp, "%lld", shlvl);
 #else
-		sprintf(bv->bp, "%ld", (long)shlvl);
+		bv->bp += sprintf(bv->bp, "%ld", (long)shlvl);
 #endif
-		bv->bp += strlen(bv->bp);
 		break;
 	    case '?':
 		addbufspc(DIGBUFSIZE);
 #if defined(ZLONG_IS_LONG_LONG) && defined(PRINTF_HAS_LLD)
-		sprintf(bv->bp, "%lld", lastval);
+		bv->bp += sprintf(bv->bp, "%lld", lastval);
 #else
-		sprintf(bv->bp, "%ld", (long)lastval);
+		bv->bp += sprintf(bv->bp, "%ld", (long)lastval);
 #endif
-		bv->bp += strlen(bv->bp);
 		break;
 	    case '%':
 	    case ')':
@@ -823,8 +895,7 @@ putpromptchar(int doprint, int endchar, zattr *txtchangep)
 		    fsptr = fsptr->prev;
 		}
 		addbufspc(DIGBUFSIZE);
-		sprintf(bv->bp, "%d", depth);
-		bv->bp += strlen(bv->bp);
+		bv->bp += sprintf(bv->bp, "%d", depth);
 		break;
 	    }
 	    case 'I':
@@ -841,11 +912,10 @@ putpromptchar(int doprint, int endchar, zattr *txtchangep)
 			lineno--;
 		    addbufspc(DIGBUFSIZE);
 #if defined(ZLONG_IS_LONG_LONG) && defined(PRINTF_HAS_LLD)
-		    sprintf(bv->bp, "%lld", flineno);
+		    bv->bp += sprintf(bv->bp, "%lld", flineno);
 #else
-		    sprintf(bv->bp, "%ld", (long)flineno);
+		    bv->bp += sprintf(bv->bp, "%ld", (long)flineno);
 #endif
-		    bv->bp += strlen(bv->bp);
 		    break;
 		}
 		/* else we're in a file and lineno is already correct */
@@ -853,11 +923,10 @@ putpromptchar(int doprint, int endchar, zattr *txtchangep)
 	    case 'i':
 		addbufspc(DIGBUFSIZE);
 #if defined(ZLONG_IS_LONG_LONG) && defined(PRINTF_HAS_LLD)
-		sprintf(bv->bp, "%lld", lineno);
+		bv->bp += sprintf(bv->bp, "%lld", lineno);
 #else
-		sprintf(bv->bp, "%ld", (long)lineno);
+		bv->bp += sprintf(bv->bp, "%ld", (long)lineno);
 #endif
-		bv->bp += strlen(bv->bp);
 		break;
 	    case 'x':
 		if (funcstack && funcstack->tp != FS_SOURCE &&
@@ -1013,9 +1082,8 @@ stradd(char *d)
 mod_export void
 tsetcap(int cap, int flags)
 {
-    if (tccan(cap) && !isset(SINGLELINEZLE) &&
-        !(termflags & (TERM_NOUP|TERM_BAD|TERM_UNKNOWN))) {
-	switch (flags & TSC_OUTPUT_MASK) {
+    if (tccan(cap) && !(termflags & (TERM_NOUP|TERM_BAD|TERM_UNKNOWN))) {
+	switch (flags) {
 	case TSC_RAW:
 	    tputs(tcstr[cap], 1, putraw);
 	    break;
@@ -1044,20 +1112,6 @@ tsetcap(int cap, int flags)
 		*bv->bp++ = Outpar;
 	    }
 	    break;
-	}
-
-	if (flags & TSC_DIRTY) {
-	    flags &= ~TSC_DIRTY;
-	    if (txtisset(TXTBOLDFACE) && cap != TCBOLDFACEBEG)
-		tsetcap(TCBOLDFACEBEG, flags);
-	    if (txtisset(TXTSTANDOUT))
-		tsetcap(TCSTANDOUTBEG, flags);
-	    if (txtisset(TXTUNDERLINE))
-		tsetcap(TCUNDERLINEBEG, flags);
-	    if (txtisset(TXTFGCOLOUR))
-		set_colour_attribute(txtattrmask, COL_SEQ_FG, flags);
-	    if (txtisset(TXTBGCOLOUR))
-		set_colour_attribute(txtattrmask, COL_SEQ_BG, flags);
 	}
     }
 }
@@ -1219,8 +1273,7 @@ countprompt(char *str, int *wp, int *hp, int overf)
 
 /**/
 static int
-prompttrunc(int arg, int truncchar, int doprint, int endchar,
-	    zattr *txtchangep)
+prompttrunc(int arg, int truncchar, int doprint, int endchar)
 {
     if (arg > 0) {
 	char ch = *bv->fm, *ptr, *truncstr;
@@ -1267,7 +1320,7 @@ prompttrunc(int arg, int truncchar, int doprint, int endchar,
 	w = bv->bp - bv->buf;
 	bv->fm++;
 	bv->trunccount = bv->dontcount;
-	putpromptchar(doprint, endchar, txtchangep);
+	putpromptchar(doprint, endchar);
 	bv->trunccount = 0;
 	ptr = bv->buf + w;	/* putpromptchar() may have realloc()'d */
 	*bv->bp = '\0';
@@ -1547,7 +1600,7 @@ prompttrunc(int arg, int truncchar, int doprint, int endchar,
 	     * With bv->truncwidth set to zero, we always reach endchar *
 	     * (or the terminating NULL) this time round.         *
 	     */
-	    if (!putpromptchar(doprint, endchar, txtchangep))
+	    if (!putpromptchar(doprint, endchar))
 		return 0;
 	}
 	/* Now we have to trick it into matching endchar again */
@@ -1585,6 +1638,240 @@ cmdpop(void)
 	cmdsp--;
 }
 
+/* functions for handling attributes */
+
+/**/
+mod_export void
+applytextattributes(int flags)
+{
+    zattr change = txtcurrentattrs ^ txtpendingattrs;
+    zattr keepon = ~change & txtpendingattrs & TXT_ATTR_ALL;
+    zattr turnoff = change & ~txtpendingattrs & TXT_ATTR_ALL;
+    int keepcount, turncount = 0;
+
+    /* bail out early if we wouldn't do anything */
+    if (!change)
+	return;
+
+    if (txtunknownattrs) {
+	txtunknownattrs &= ~change; /* changes cease to be unknown */
+	/* can't turn unknown attrs back on so avoid wiping them */
+	keepcount = 1;
+    } else {
+	/* If we want to turn off more attributes than we want to keep on
+	 * then it takes fewer termcap sequences to just turn off all the
+	 * attributes. */
+	for (keepcount = 0; keepon; keepcount++) /* count bits */
+	    keepon &= keepon - 1;
+	for (; turnoff; turncount++)
+	    turnoff &= turnoff - 1;
+    }
+
+    /* enabling bold can be relied upon to disable faint
+     * (the converse not so as that commonly does nothing at all) */
+    if (txtcurrentattrs & TXTFAINT && txtpendingattrs & TXTBOLDFACE) {
+	--turncount;
+	change &= ~TXTFAINT;
+    }
+
+    if (keepcount < turncount ||
+	    (change & ~txtpendingattrs & TXT_ATTR_FONT_WEIGHT)) {
+	tsetcap(TCALLATTRSOFF, flags);
+	/* this cleared all attributes, may need to restore some */
+	change = txtpendingattrs & TXT_ATTR_ALL & ~txtunknownattrs;
+	txtunknownattrs = 0;
+    } else {
+	if (change & ~txtpendingattrs & TXTSTANDOUT) {
+	    tsetcap(TCSTANDOUTEND, flags);
+	    /* in some cases, that clears all attributes */
+	    change = (txtpendingattrs & TXT_ATTR_ALL & ~txtunknownattrs) |
+		    (TXTUNDERLINE & change);
+	}
+	if (change & ~txtpendingattrs & TXTUNDERLINE) {
+	    tsetcap(TCUNDERLINEEND, flags);
+	    /* in some cases, that clears all attributes */
+	    change = txtpendingattrs & TXT_ATTR_ALL & ~txtunknownattrs;
+	}
+	if (change & ~txtpendingattrs & TXTITALIC)
+	    tsetcap(TCITALICSEND, flags);
+    }
+    if (change & txtpendingattrs & TXTBOLDFACE)
+	tsetcap(TCBOLDFACEBEG, flags);
+    if (change & txtpendingattrs & TXTFAINT)
+	tsetcap(TCFAINTBEG, flags);
+    if (change & txtpendingattrs & TXTSTANDOUT)
+	tsetcap(TCSTANDOUTBEG, flags);
+    if (change & txtpendingattrs & TXTUNDERLINE)
+	tsetcap(TCUNDERLINEBEG, flags);
+    if (change & txtpendingattrs & TXTITALIC)
+	tsetcap(TCITALICSBEG, flags);
+
+    if (change & TXT_ATTR_FG_MASK)
+	set_colour_attribute(txtpendingattrs, COL_SEQ_FG, flags);
+    if (change & TXT_ATTR_BG_MASK)
+	set_colour_attribute(txtpendingattrs, COL_SEQ_BG, flags);
+
+    txtcurrentattrs = txtpendingattrs;
+}
+
+/**/
+mod_export void
+treplaceattrs(zattr newattrs)
+{
+    if (newattrs == TXT_ERROR)
+	return;
+
+    if (txtunknownattrs) {
+	/* Set current attributes to the opposite of the new ones
+	 * for any that are unknown so that applytextattributes()
+	 * detects them as changed. */
+	txtcurrentattrs &= ~txtunknownattrs;
+	txtcurrentattrs |= txtunknownattrs & ~newattrs;
+    }
+
+    txtpendingattrs = newattrs;
+}
+
+/**/
+mod_export void
+tsetattrs(zattr newattrs)
+{
+    /* assume any unknown attributes that we're now setting were unset */
+    txtcurrentattrs &= ~(newattrs & txtunknownattrs);
+
+    txtpendingattrs |= newattrs & TXT_ATTR_ALL;
+    if (newattrs & TXTFGCOLOUR) {
+	txtpendingattrs &= ~TXT_ATTR_FG_MASK;
+	txtpendingattrs |= newattrs & TXT_ATTR_FG_MASK;
+    }
+    if (newattrs & TXTBGCOLOUR) {
+	txtpendingattrs &= ~TXT_ATTR_BG_MASK;
+	txtpendingattrs |= newattrs & TXT_ATTR_BG_MASK;
+    }
+}
+
+/**/
+mod_export void
+tunsetattrs(zattr newattrs)
+{
+    /* assume any unknown attributes that we're now unsetting were set */
+    txtcurrentattrs |= newattrs & txtunknownattrs;
+
+    txtpendingattrs &= ~(newattrs & TXT_ATTR_ALL);
+    if (newattrs & TXTFGCOLOUR)
+	txtpendingattrs &= ~TXT_ATTR_FG_MASK;
+    if (newattrs & TXTBGCOLOUR)
+	txtpendingattrs &= ~TXT_ATTR_BG_MASK;
+}
+
+static void
+map256toRGB(zattr *atr, int shift, zattr set24)
+{
+    unsigned colour, red, green, blue;
+
+    if (*atr & set24)
+	return;
+
+    if ((colour = ((*atr >> shift) & 0xff)) < 16)
+	return;
+
+    if (colour >= 16 && colour < 232) {
+	colour -= 16;
+	blue = !!colour * 0x37 + 40 * (colour % 6);
+	colour /= 6;
+	green = !!colour * 0x37 + 40 * (colour % 6);
+	colour /= 6;
+	red = !!colour * 0x37 + 40 * colour;
+    } else {
+	red = green = blue = 8 + 10 * (colour - 232);
+    }
+
+    *atr &= ~((zattr) 0xffffff << shift);
+    *atr |= set24 | (zattr) ((((red << 8) + green) << 8) + blue) << shift;
+}
+
+/* Merge two attribute sets.
+ * secondary is the background base attributes
+ * primary is attributes to be overlaid, taking precedence.
+ * mask indicates those attributes in primary that were explicitly
+ * set allowing an explicitly disabled attribute in primary to take
+ * precedence. */
+
+/**/
+mod_export zattr
+mixattrs(zattr primary, zattr mask, zattr secondary)
+{
+    zattr mix = 0; /* attributes resulting from colour mixing */
+    zattr keep;    /* attributes from secondary */
+    zattr replace = mask & TXT_ATTR_ALL; /* attributes from primary */
+    zattr toset = TXT_ATTR_FG_MASK;
+    zattr isset = TXTFGCOLOUR;
+    zattr istrue = TXT_ATTR_FG_24BIT;
+    unsigned int shift = TXT_ATTR_FG_COL_SHIFT;
+    int opacity, i;
+
+    if (mask & TXT_ATTR_FONT_WEIGHT)
+	replace |= TXT_ATTR_FONT_WEIGHT;
+    if (mask & TXTFGCOLOUR)
+	replace |= TXT_ATTR_FG_MASK;
+    if (mask & TXTBGCOLOUR)
+	replace |= TXT_ATTR_BG_MASK;
+    keep = ~replace;
+
+    do {
+	if (mask & isset && (opacity = (mask >> shift) & 127)) {
+	    zattr argb, brgb;
+	    /* we may know the default colours from the startup query */
+	    zattr aatt = (primary & isset) ? primary : memo_term_color;
+	    zattr batt = (secondary & isset) ? secondary : memo_term_color;
+
+	    keep &= ~toset;
+	    replace &= ~toset;
+
+	    if (tccolours == 256) {
+		map256toRGB(&aatt, shift, istrue);
+		map256toRGB(&batt, shift, istrue);
+	    }
+
+	    /* can only mix if we now have truecolor */
+	    if (aatt & batt & istrue) {
+		mix |= istrue | isset;
+		for (i = 0; i < 24; i += 8) {
+		    argb = (aatt >> (shift + i)) & 0xff;
+		    brgb = (batt >> (shift + i)) & 0xff;
+		    mix |= ((argb * (100 - opacity) + brgb * opacity) / 100)
+			<< (shift + i);
+		}
+		if (!truecolor_terminal() && (!empty(GETCOLORATTR->funcs) ||
+			!load_module("zsh/nearcolor", NULL, 1))) {
+		    struct color_rgb color = {
+			(mix >> (shift + 16)) & 0xff,
+			(mix >> (shift + 8)) & 0xff,
+			(mix >> shift) & 0xff
+		    };
+		    int color_idx = runhookdef(GETCOLORATTR, &color) - 1;
+		    if (color_idx >= 0) {
+		        mix &= ~toset;
+			mix |= isset | ((zattr) color_idx << shift);
+		    }
+		}
+	    } else if (opacity <= 50)
+		replace |= toset;
+	    else
+		keep |= toset;
+	}
+
+	if (isset == TXTBGCOLOUR)
+	    break;
+
+	shift = TXT_ATTR_BG_COL_SHIFT;
+	toset = TXT_ATTR_BG_COL_MASK;
+	isset = TXTBGCOLOUR;
+        istrue = TXT_ATTR_BG_24BIT;
+    } while (1);
+
+    return (primary & replace) | (secondary & keep) | mix;
+}
 
 /*****************************************************************************
  * Utilities dealing with colour and other forms of highlighting.
@@ -1607,10 +1894,12 @@ struct highlight {
 };
 
 static const struct highlight highlights[] = {
-    { "none", 0, TXT_ATTR_ON_MASK },
-    { "bold", TXTBOLDFACE, 0 },
+    { "reset", 0, TXT_ATTR_ALL },
+    { "bold", TXTBOLDFACE, TXTFAINT },
+    { "faint", TXTFAINT, TXTBOLDFACE },
     { "standout", TXTSTANDOUT, 0 },
     { "underline", TXTUNDERLINE, 0 },
+    { "italic", TXTITALIC, 0 },
     { NULL, 0, 0 }
 };
 
@@ -1641,12 +1930,26 @@ match_named_colour(const char **teststrp)
     return -1;
 }
 
+/**/
+static int
+truecolor_terminal(void)
+{
+    char **f, **flist = getaparam(".term.extensions");
+    int result;
+    for (f = flist; f && *f; f++) {
+	result = **f != '-';
+	if (!strcmp(*f + !result, "truecolor"))
+	    return result;
+    }
+    return 0; /* disabled by default */
+}
+
 /*
  * Match just the colour part of a highlight specification.
  * If teststrp is NULL, use the already parsed numeric colour.
  * Return the attributes to set in the attribute variable.
- * Return -1 for out of range.  Does not check the character
- * following the colour specification.
+ * Return TXT_ERROR for out of range.  Does not check the
+ * character following the colour specification.
  */
 
 /**/
@@ -1666,7 +1969,7 @@ match_colour(const char **teststrp, int is_fg, int colour)
 	tc = TCBGCOLOUR;
     }
     if (teststrp) {
-	if (**teststrp == '#' && isxdigit(STOUC((*teststrp)[1]))) {
+	if (**teststrp == '#' && isxdigit((unsigned char) (*teststrp)[1])) {
 	    struct color_rgb color;
 	    char *end;
 	    zlong col = zstrtol(*teststrp+1, &end, 16);
@@ -1684,7 +1987,10 @@ match_colour(const char **teststrp, int is_fg, int colour)
 		return TXT_ERROR;
 	    *teststrp = end;
 	    colour = runhookdef(GETCOLORATTR, &color) - 1;
-	    if (colour == -1) { /* no hook function added, try true color (24-bit) */
+	    if (colour == -1 && !truecolor_terminal() &&
+		    !load_module("zsh/nearcolor", NULL, 1))
+		colour = runhookdef(GETCOLORATTR, &color) - 1;
+	    if (colour == -1) { /* use true color (24-bit) */
 		colour = (((color.red << 8) + color.green) << 8) + color.blue;
 		return on | (is_fg ? TXT_ATTR_FG_24BIT : TXT_ATTR_BG_24BIT) |
 			(zattr)colour << shft;
@@ -1693,10 +1999,8 @@ match_colour(const char **teststrp, int is_fg, int colour)
 	    }
 	} else if ((named = ialpha(**teststrp))) {
 	    colour = match_named_colour(teststrp);
-	    if (colour == 8) {
-		/* default */
-		return is_fg ? TXTNOFGCOLOUR : TXTNOBGCOLOUR;
-	    }
+	    if (colour == 8) /* default */
+		return 0;
 	    if (colour < 0)
 		return TXT_ERROR;
 	}
@@ -1717,23 +2021,32 @@ match_colour(const char **teststrp, int is_fg, int colour)
 /*
  * Match a set of highlights in the given teststr.
  * Set *on_var to reflect the values found.
+ * Set *setmask to explicitly set attributes
+ * Set *layer to the layer
  * Return a pointer to the first character not consumed.
  */
 
 /**/
 mod_export const char *
-match_highlight(const char *teststr, zattr *on_var)
+match_highlight(const char *teststr, zattr *on_var, zattr *setmask, int *layer)
 {
     int found = 1;
+    zattr mask = 0;
 
     *on_var = 0;
     while (found && *teststr) {
 	const struct highlight *hl;
+	zattr atr = 0;
 
 	found = 0;
-	if (strpfx("fg=", teststr) || strpfx("bg=", teststr)) {
+	if (strpfx("hl=", teststr)) {
+	    teststr += 3;
+	    teststr = parsehighlight((char *)teststr, ',', &atr, &mask);
+	    if (atr != TXT_ERROR)
+		*on_var = atr;
+	    found = 1;
+	} else if (strpfx("fg=", teststr) || strpfx("bg=", teststr)) {
 	    int is_fg = (teststr[0] == 'f');
-	    zattr atr;
 
 	    teststr += 3;
 	    atr = match_colour(&teststr, is_fg, 0);
@@ -1743,10 +2056,45 @@ match_highlight(const char *teststr, zattr *on_var)
 		break;
 	    found = 1;
 	    /* skip out of range colours but keep scanning attributes */
-	    if (atr != TXT_ERROR)
+	    if (atr != TXT_ERROR) {
+		*on_var &=  is_fg ? (zattr) ~TXT_ATTR_FG_MASK : (zattr) ~TXT_ATTR_BG_MASK;
 		*on_var |= atr;
+		mask |= is_fg ? TXTFGCOLOUR : TXTBGCOLOUR;
+	    }
+	} else if (layer && strpfx("layer=", teststr)) {
+	    teststr += 6;
+	    *layer = (int) zstrtol(teststr, (char **) &teststr, 10);
+	    if (*teststr == ',')
+		teststr++;
+	    else if (*teststr && *teststr != ' ')
+		break;
+	    found = 1;
+	} else if (strpfx("opacity=", teststr)) {
+	    teststr += 8;
+	    zulong opacity = zstrtol(teststr, (char **) &teststr, 10);
+	    if (opacity > 100)
+		break;
+	    if (*teststr == '%')
+		teststr++;
+	    /* invert sense so 0 is fully opaque */
+	    mask |= (100 - opacity) << TXT_ATTR_FG_COL_SHIFT;
+	    if (*teststr == '/') {
+		teststr++;
+		opacity = zstrtol(teststr, (char **) &teststr, 10);
+		if (opacity > 100)
+		    break;
+		if (*teststr == '%')
+		    teststr++;
+	    }
+	    mask |= (100 - opacity) << TXT_ATTR_BG_COL_SHIFT;
+	    if (*teststr == ',')
+		teststr++;
+	    else if (*teststr && *teststr != ' ')
+		break;
+	    found = 1;
 	} else {
-	    for (hl = highlights; hl->name; hl++) {
+	    int turn_off = 0;
+	    for (hl = highlights; !found && hl->name; hl++) {
 		if (strpfx(hl->name, teststr)) {
 		    const char *val = teststr + strlen(hl->name);
 
@@ -1755,14 +2103,25 @@ match_highlight(const char *teststr, zattr *on_var)
 		    else if (*val && *val != ' ')
 			break;
 
-		    *on_var |= hl->mask_on;
-		    *on_var &= ~hl->mask_off;
+		    if (turn_off) {
+			*on_var &= ~hl->mask_on & ~hl->mask_off;
+		    } else {
+			*on_var |= hl->mask_on;
+			*on_var &= ~hl->mask_off;
+		    }
+		    mask |= hl->mask_on | hl->mask_off;
 		    teststr = val;
 		    found = 1;
 		}
+		/* delayed this to the end of the first iteration because
+		 * "noclear" isn't valid */
+		if (hl == highlights && (turn_off = strpfx("no", teststr)))
+		    teststr += 2;
 	    }
 	}
     }
+    if (setmask)
+	*setmask = mask;
 
     return teststr;
 }
@@ -1776,7 +2135,7 @@ match_highlight(const char *teststr, zattr *on_var)
 static int
 output_colour(int colour, int fg_bg, int truecol, char *buf)
 {
-    int atrlen = 3, len;
+    int atrlen = 3;
     char *ptr = buf;
     if (buf) {
 	strcpy(ptr, fg_bg == COL_SEQ_FG ? "fg=" : "bg=");
@@ -1794,14 +2153,11 @@ output_colour(int colour, int fg_bg, int truecol, char *buf)
      */
     } else if (colour > 7) {
 	char digbuf[DIGBUFSIZE];
-	sprintf(digbuf, "%d", colour);
-	len = strlen(digbuf);
-	atrlen += len;
+	atrlen += sprintf(digbuf, "%d", colour);
 	if (buf)
 	    strcpy(ptr, digbuf);
     } else {
-	len = strlen(ansi_colours[colour]);
-	atrlen += len;
+	atrlen += strlen(ansi_colours[colour]);
 	if (buf)
 	    strcpy(ptr, ansi_colours[colour]);
     }
@@ -1820,22 +2176,28 @@ output_colour(int colour, int fg_bg, int truecol, char *buf)
 
 /**/
 mod_export int
-output_highlight(zattr atr, char *buf)
+output_highlight(zattr atr, zattr mask, char *buf)
 {
     const struct highlight *hp;
     int atrlen = 0, len;
     char *ptr = buf;
 
-    if (atr & TXTFGCOLOUR) {
-	len = output_colour(txtchangeget(atr, TXT_ATTR_FG_COL),
-			    COL_SEQ_FG,
-			    (atr & TXT_ATTR_FG_24BIT),
-			    ptr);
-	atrlen += len;
-	if (buf)
-	    ptr += len;
+    if (mask == TXT_ATTR_ALL) {
+	zattr threebits = ~atr & TXT_ATTR_ALL;
+	threebits &= threebits - 1; /* can't be both bold and faint */
+	threebits &= threebits - 1; /* strip next bit to allow one "no" entry */
+
+	if (threebits) { /* more remain - shorter to start with "none" */
+	    mask &= atr; /* mark unset bits from atr as done */
+	    atrlen = 4;
+	    if (buf) {
+		strcpy(ptr, "reset");
+		ptr += 5;
+	    }
+	}
     }
-    if (atr & TXTBGCOLOUR) {
+
+    if (mask & TXTFGCOLOUR) {
 	if (atrlen) {
 	    atrlen++;
 	    if (buf) {
@@ -1843,21 +2205,58 @@ output_highlight(zattr atr, char *buf)
 		ptr++;
 	    }
 	}
-	len = output_colour(txtchangeget(atr, TXT_ATTR_BG_COL),
-			    COL_SEQ_BG,
-			    (atr & TXT_ATTR_BG_24BIT),
-			    ptr);
-	atrlen += len;
-	if (buf)
-	    ptr += len;
+	if (atr & TXTFGCOLOUR) {
+	    len = output_colour(txtchangeget(atr, TXT_ATTR_FG_COL), COL_SEQ_FG,
+		    (atr & TXT_ATTR_FG_24BIT), ptr);
+	    atrlen += len;
+	    if (buf)
+		ptr += len;
+	} else {
+	    atrlen += 10;
+	    if (buf) {
+		strcpy(ptr, "fg=default");
+		ptr += 10;
+	    }
+	}
     }
+    if (mask & TXTBGCOLOUR) {
+	if (atrlen) {
+	    atrlen++;
+	    if (buf) {
+		strcpy(ptr, ",");
+		ptr++;
+	    }
+	}
+	if (atr & TXTBGCOLOUR) {
+	    len = output_colour(txtchangeget(atr, TXT_ATTR_BG_COL), COL_SEQ_BG,
+		    (atr & TXT_ATTR_BG_24BIT), ptr);
+	    atrlen += len;
+	    if (buf)
+		ptr += len;
+	} else {
+	    atrlen += 10;
+	    if (buf) {
+		strcpy(ptr, "bg=default");
+		ptr += 10;
+	    }
+	}
+    }
+
     for (hp = highlights; hp->name; hp++) {
-	if (hp->mask_on & atr) {
+	if (hp->mask_on & mask && !(hp->mask_off & mask & atr)) {
+	    mask &= ~hp->mask_off;
 	    if (atrlen) {
 		atrlen++;
 		if (buf) {
 		    strcpy(ptr, ",");
 		    ptr++;
+		}
+	    }
+	    if (!(hp->mask_on & atr)) {
+		atrlen += 2;
+		if (buf) {
+		    strcpy(ptr, "no");
+		    ptr += 2;
 		}
 	    }
 	    len = strlen(hp->name);
@@ -1874,6 +2273,30 @@ output_highlight(zattr atr, char *buf)
 	    strcpy(ptr, "none");
 	return 4;
     }
+
+    if (mask & (TXT_ATTR_FG_COL_MASK | TXT_ATTR_BG_COL_MASK)) {
+	unsigned fg_op, bg_op;
+        char tmp[13];
+	size_t len;
+
+	if (atrlen) {
+	    atrlen++;
+	    if (buf) {
+		strcpy(ptr, ",");
+		ptr++;
+	    }
+	}
+	atrlen += 8;
+	fg_op = (mask >> TXT_ATTR_FG_COL_SHIFT) & 127;
+	bg_op = (mask >> TXT_ATTR_BG_COL_SHIFT) & 127;
+	len = sprintf(buf ? ptr : tmp, "opacity=%u%%", 100 - fg_op);
+	atrlen += len;
+	if (buf)
+	    ptr += len;
+	if (fg_op != bg_op)
+	    atrlen += sprintf(buf ? ptr : tmp, "/%u%%", 100 - bg_op);
+    }
+
     return atrlen;
 }
 
@@ -2024,13 +2447,13 @@ set_colour_attribute(zattr atr, int fg_bg, int flags)
     if (fg_bg == COL_SEQ_FG) {
 	colour = txtchangeget(atr, TXT_ATTR_FG_COL);
 	tc = TCFGCOLOUR;
-	def = txtchangeisset(atr, TXTNOFGCOLOUR);
-	use_truecolor = txtchangeisset(atr, TXT_ATTR_FG_24BIT);
+	def = !(atr & TXTFGCOLOUR);
+	use_truecolor = atr & TXT_ATTR_FG_24BIT;
     } else {
 	colour = txtchangeget(atr, TXT_ATTR_BG_COL);
 	tc = TCBGCOLOUR;
-	def = txtchangeisset(atr, TXTNOBGCOLOUR);
-	use_truecolor = txtchangeisset(atr, TXT_ATTR_BG_24BIT);
+	def = !(atr & TXTBGCOLOUR);
+	use_truecolor = atr & TXT_ATTR_BG_24BIT;
     }
 
     /* Test if current zle_highlight settings are customized, or

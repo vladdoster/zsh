@@ -1302,7 +1302,7 @@ zccmd_mouse(const char *nam, char **args)
 	    zlong delay;
 
 	    if (!*++args ||
-		((delay = zstrtol(*args, &eptr, 10)), eptr != NULL)) {
+		((delay = zstrtol(*args, &eptr, 10)), *eptr != '\0')) {
 		zwarnnam(nam, "mouse delay requires an integer argument");
 		return 1;
 	    }
@@ -1326,7 +1326,7 @@ zccmd_mouse(const char *nam, char **args)
 		if (old_mask != zcurses_mouse_mask)
 		    zcurses_flags |= ZCF_MOUSE_MASK_CHANGED;
 	    } else {
-		zwarnnam(nam, "unrecognised mouse command: %s", *arg);
+		zwarnnam(nam, "unrecognised mouse command: %s", arg);
 		return 1;
 	    }
 	}
@@ -1426,10 +1426,10 @@ zccmd_querychar(const char *nam, char **args)
     inc &= A_CHARTEXT;
     if (imeta(inc)) {
 	instr[0] = Meta;
-	instr[1] = STOUC(inc ^ 32);
+	instr[1] = (unsigned char) (inc ^ 32);
 	instr[2] = '\0';
     } else {
-	instr[0] = STOUC(inc);
+  	instr[0] = (unsigned char) inc;
 	instr[1] = '\0';
     }
     attrs = inc;

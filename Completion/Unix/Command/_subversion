@@ -139,7 +139,7 @@ _svn () {
           ;;
           (commit)
             args=(
-	      ${args/(#b)(*--file*):arg:/$match[1]:file:_files}
+	      ${args/(#b)(*--file*):arg:/${match[1]}:file:_files}
               '*:file: _svn_modified "committable"'
             )
           ;;
@@ -189,7 +189,7 @@ _svn () {
 	    args=(
 	    ':propname:(svn:ignore svn:keywords svn:executable svn:eol-style svn:mime-type svn:externals svn:needs-lock svn:global-ignores svn:auto-props)'
 	    ':propval:->propset_propval'
-	    ${args/(#b)(*--file*):arg:/$match[1]:file:_files}
+	    ${args/(#b)(*--file*):arg:/${match[1]}:file:_files}
 	    '*:path or url: _alternative "files:file:_files" "urls:URL:_svn_urls"'
 	    )
 	  ;;
@@ -240,7 +240,7 @@ _svn () {
               (svn:eol-style) compadd - CR LF CRLF native;;
               (svn:mime-type) _mime_types;;
               (*) _message 'property value';;
-            esac
+            esac && ret=0
         esac
 
       else
@@ -318,6 +318,9 @@ _svnadmin () {
           # Test cases:
           #   svnadmin freeze . rsync --<TAB> offers --file
           #   svnadmin freeze -- . rsync -<TAB> offers rsync's options
+          #   svnadmin freeze . -- rsync -<TAB> should do the same (but currently doesn't)
+          #
+          # TODO: Fix the third case.
           #
           # Note: the NORMARG calculations here include one positional argument
           # (the '.') before the command.

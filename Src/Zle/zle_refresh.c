@@ -36,8 +36,8 @@
  * non-zero width followed by an arbitrary (but typically small)
  * number of characters that have zero width (combining characters).
  *
- * The allocated size for each array is given by ?mw_size; nmw_ind
- * is the next free element, i.e. nmwbuf[nmw_ind] will be the next
+ * The allocated size for each array is given by omw_size and nmw_size;
+ * nmw_ind is the next free element, i.e. nmwbuf[nmw_ind] will be the next
  * element to be written (we never insert into omwbuf).  We initialise
  * nmw_ind to 1 to avoid the index stored in the character looking like a
  * NULL.  This wastees a word but it's safer than messing with pointers.
@@ -149,7 +149,7 @@ char *lpromptbuf, *rpromptbuf;
 /* Text attributes after displaying prompts */
 
 /**/
-zattr pmpt_attr, rpmpt_attr;
+zattr pmpt_attr, rpmpt_attr, prompt_attr;
 
 /* number of lines displayed */
 
@@ -203,12 +203,18 @@ int predisplaylen, postdisplaylen;
 
 
 /*
- * Attributes used by default on the command line, and
- * attributes for highlighting special (unprintable) characters
- * displayed on screen.
+ * Attributes used by default on the command line,
+ * for highlighting special (unprintable) characters displayed on screen,
+ * and for ellipsis continuation markers.
  */
 
-static zattr default_atr_on, special_atr_on;
+static zattr default_attr, default_mask, special_attr, special_mask, ellipsis_attr;
+
+/*
+ * Layer applied to highlighting for special characters
+ */
+
+static int special_layer;
 
 /*
  * Array of region highlights, no special termination.
@@ -245,20 +251,20 @@ char *tcout_func_name;
 int cost;
 
 # define SELECT_ADD_COST(X)	(cost += X)
-# define zputc(a)		(zwcputc(a, NULL), cost++)
+# define zputc(a)		(zwcputc(a), cost++)
 # define zwrite(a, b)		(zwcwrite((a), (b)), \
 				 cost += ((b) * ZLE_CHAR_SIZE))
 #else
 # define SELECT_ADD_COST(X)
-# define zputc(a)		zwcputc(a, NULL)
+# define zputc(a)		zwcputc(a)
 # define zwrite(a, b)		zwcwrite((a), (b))
 #endif
 
-static const REFRESH_ELEMENT zr_cr = { ZWC('\r'), 0 };
+static const REFRESH_ELEMENT zr_cr = { ZWC('\r'), TXT_ERROR };
 #ifdef MULTIBYTE_SUPPORT
-static const REFRESH_ELEMENT zr_dt = { ZWC('.'), 0 };
+static const REFRESH_ELEMENT zr_dt = { ZWC('.'), TXT_ERROR };
 #endif
-static const REFRESH_ELEMENT zr_nl = { ZWC('\n'), 0 };
+static const REFRESH_ELEMENT zr_nl = { ZWC('\n'), TXT_ERROR };
 static const REFRESH_ELEMENT zr_sp = { ZWC(' '), 0 };
 static const REFRESH_ELEMENT zr_zr = { ZWC('\0'), 0 };
 
@@ -269,10 +275,10 @@ static const REFRESH_ELEMENT zr_zr = { ZWC('\0'), 0 };
 static const REFRESH_ELEMENT zr_end_ellipsis[] = {
     { ZWC(' '), 0 },
     { ZWC('<'), 0 },
-    { ZWC('.'), 0 },
-    { ZWC('.'), 0 },
-    { ZWC('.'), 0 },
-    { ZWC('.'), 0 },
+    { ZWC('.'), TXT_ERROR },
+    { ZWC('.'), TXT_ERROR },
+    { ZWC('.'), TXT_ERROR },
+    { ZWC('.'), TXT_ERROR },
     { ZWC(' '), 0 },
 };
 #define ZR_END_ELLIPSIS_SIZE	\
@@ -281,16 +287,16 @@ static const REFRESH_ELEMENT zr_end_ellipsis[] = {
 static const REFRESH_ELEMENT zr_mid_ellipsis1[] = {
     { ZWC(' '), 0 },
     { ZWC('<'), 0 },
-    { ZWC('.'), 0 },
-    { ZWC('.'), 0 },
-    { ZWC('.'), 0 },
-    { ZWC('.'), 0 },
+    { ZWC('.'), TXT_ERROR },
+    { ZWC('.'), TXT_ERROR },
+    { ZWC('.'), TXT_ERROR },
+    { ZWC('.'), TXT_ERROR },
 };
 #define ZR_MID_ELLIPSIS1_SIZE	\
     ((int)(sizeof(zr_mid_ellipsis1)/sizeof(zr_mid_ellipsis1[0])))
 
 static const REFRESH_ELEMENT zr_mid_ellipsis2[] = {
-    { ZWC('>'), 0 },
+    { ZWC('>'), TXT_ERROR },
     { ZWC(' '), 0 },
 };
 #define ZR_MID_ELLIPSIS2_SIZE	\
@@ -298,10 +304,10 @@ static const REFRESH_ELEMENT zr_mid_ellipsis2[] = {
 
 static const REFRESH_ELEMENT zr_start_ellipsis[] = {
     { ZWC('>'), 0 },
-    { ZWC('.'), 0 },
-    { ZWC('.'), 0 },
-    { ZWC('.'), 0 },
-    { ZWC('.'), 0 },
+    { ZWC('.'), TXT_ERROR },
+    { ZWC('.'), TXT_ERROR },
+    { ZWC('.'), TXT_ERROR },
+    { ZWC('.'), TXT_ERROR },
 };
 #define ZR_START_ELLIPSIS_SIZE	\
     ((int)(sizeof(zr_start_ellipsis)/sizeof(zr_start_ellipsis[0])))
@@ -316,14 +322,15 @@ static void
 zle_set_highlight(void)
 {
     char **atrs = getaparam("zle_highlight");
-    int special_atr_on_set = 0;
-    int region_atr_on_set = 0;
-    int isearch_atr_on_set = 0;
-    int suffix_atr_on_set = 0;
-    int paste_atr_on_set = 0;
+    int special_attr_set = 0;
+    int region_attr_set = 0;
+    int isearch_attr_set = 0;
+    int suffix_attr_set = 0;
+    int paste_attr_set = 0;
+    int ellipsis_attr_set = 0;
     struct region_highlight *rhp;
 
-    special_atr_on = default_atr_on = 0;
+    special_attr = default_attr = special_mask = default_mask = 0;
     if (!region_highlights) {
 	region_highlights = (struct region_highlight *)
 	    zshcalloc(N_SPECIAL_HIGHLIGHTS*sizeof(struct region_highlight));
@@ -336,46 +343,68 @@ zle_set_highlight(void)
 	}
     }
 
+    /* Default layers */
+    region_highlights[0].layer = 20; /* region */
+    region_highlights[1].layer = 20; /* isearch */
+    region_highlights[2].layer = 10; /* suffix */
+    region_highlights[3].layer = 15; /* paste */
+    special_layer = 30;
+
     if (atrs) {
 	for (; *atrs; atrs++) {
 	    if (!strcmp(*atrs, "none")) {
 		/* reset attributes for consistency... usually unnecessary */
-		special_atr_on = default_atr_on = 0;
-		special_atr_on_set = 1;
-		paste_atr_on_set = region_atr_on_set =
-		    isearch_atr_on_set = suffix_atr_on_set = 1;
+		special_attr = default_attr = special_mask = default_mask = 0;
+		special_attr_set = 1;
+		paste_attr_set = region_attr_set =
+		    isearch_attr_set = suffix_attr_set = 1;
 	    } else if (strpfx("default:", *atrs)) {
-		match_highlight(*atrs + 8, &default_atr_on);
+		match_highlight(*atrs + 8, &default_attr, &default_mask, NULL);
 	    } else if (strpfx("special:", *atrs)) {
-		match_highlight(*atrs + 8, &special_atr_on);
-		special_atr_on_set = 1;
+		match_highlight(*atrs + 8, &special_attr, &special_mask,
+			&special_layer);
+		special_attr_set = 1;
 	    } else if (strpfx("region:", *atrs)) {
-		match_highlight(*atrs + 7, &region_highlights[0].atr);
-		region_atr_on_set = 1;
+		match_highlight(*atrs + 7, &(region_highlights[0].atr),
+                        &(region_highlights[0].atrmask),
+			&(region_highlights[0].layer));
+		region_attr_set = 1;
 	    } else if (strpfx("isearch:", *atrs)) {
-		match_highlight(*atrs + 8, &(region_highlights[1].atr));
-		isearch_atr_on_set = 1;
+		match_highlight(*atrs + 8, &(region_highlights[1].atr),
+                        &(region_highlights[1].atrmask),
+			&(region_highlights[1].layer));
+		isearch_attr_set = 1;
 	    } else if (strpfx("suffix:", *atrs)) {
-		match_highlight(*atrs + 7, &(region_highlights[2].atr));
-		suffix_atr_on_set = 1;
+		match_highlight(*atrs + 7, &(region_highlights[2].atr),
+                        &(region_highlights[2].atrmask),
+			&(region_highlights[2].layer));
+		suffix_attr_set = 1;
 	    } else if (strpfx("paste:", *atrs)) {
-		match_highlight(*atrs + 6, &(region_highlights[3].atr));
-		paste_atr_on_set = 1;
+		match_highlight(*atrs + 6, &(region_highlights[3].atr),
+                        &(region_highlights[3].atrmask),
+			&(region_highlights[3].layer));
+		paste_attr_set = 1;
+	    } else if (strpfx("ellipsis:", *atrs)) {
+		match_highlight(*atrs + 9, &ellipsis_attr, NULL, NULL);
+		ellipsis_attr_set = 1;
 	    }
 	}
     }
 
-    /* Defaults */
-    if (!special_atr_on_set)
-	special_atr_on = TXTSTANDOUT;
-    if (!region_atr_on_set)
-	region_highlights[0].atr = TXTSTANDOUT;
-    if (!isearch_atr_on_set)
-	region_highlights[1].atr = TXTUNDERLINE;
-    if (!suffix_atr_on_set)
-	region_highlights[2].atr = TXTBOLDFACE;
-    if (!paste_atr_on_set)
-	region_highlights[3].atr = TXTSTANDOUT;
+    /* Default attributes */
+    if (!special_attr_set)
+	special_attr = special_mask = TXTSTANDOUT;
+    if (!region_attr_set)
+	region_highlights[0].atr = region_highlights[0].atrmask = TXTSTANDOUT;
+    if (!isearch_attr_set)
+	region_highlights[1].atr = region_highlights[1].atrmask = TXTUNDERLINE;
+    if (!suffix_attr_set)
+	region_highlights[2].atr = region_highlights[2].atrmask = TXTBOLDFACE;
+    if (!paste_attr_set)
+	region_highlights[3].atr = region_highlights[3].atrmask = TXTSTANDOUT;
+    if (!ellipsis_attr_set)
+	ellipsis_attr = TXTBGCOLOUR | ((zattr) 3 << TXT_ATTR_BG_COL_SHIFT) |
+		TXTFGCOLOUR | ((zattr) 4 << TXT_ATTR_FG_COL_SHIFT);
 
     allocate_colour_buffer();
 }
@@ -400,14 +429,13 @@ zle_free_highlight(void)
 char **
 get_region_highlight(UNUSED(Param pm))
 {
-    int arrsize = n_region_highlights;
+    int arrsize = n_region_highlights - N_SPECIAL_HIGHLIGHTS;
     char **retarr, **arrp;
     struct region_highlight *rhp;
 
     /* region_highlights may not have been set yet */
-    if (!arrsize)
+    if (!n_region_highlights)
 	return hmkarray(NULL);
-    arrsize -= N_SPECIAL_HIGHLIGHTS;
     DPUTS(arrsize < 0, "arrsize is negative from n_region_highlights");
     arrp = retarr = (char **)zhalloc((arrsize+1)*sizeof(char *));
 
@@ -415,20 +443,18 @@ get_region_highlight(UNUSED(Param pm))
     for (rhp = region_highlights + N_SPECIAL_HIGHLIGHTS;
 	 arrsize--;
 	 rhp++, arrp++) {
-	char digbuf1[DIGBUFSIZE], digbuf2[DIGBUFSIZE];
-	int atrlen, alloclen;
-	const char memo_equals[] = "memo=";
-
-	sprintf(digbuf1, "%d", rhp->start);
-	sprintf(digbuf2, "%d", rhp->end);
-
-	atrlen = output_highlight(rhp->atr, NULL);
-	alloclen = atrlen + strlen(digbuf1) + strlen(digbuf2) +
-	    3; /* 2 spaces, 1 terminating NUL */
+	char digbuf[2 * DIGBUFSIZE], layerbuf[7 + DIGBUFSIZE];
+	int offset;
+	const char memo_equals[] = " memo=";
+	int alloclen = sprintf(digbuf, "%d %d", rhp->start, rhp->end) +
+	    output_highlight(rhp->atr, rhp->atrmask, NULL) +
+	    2; /* space and terminating NUL */
 	if (rhp->flags & ZRH_PREDISPLAY)
-	    alloclen += 2; /* "P " */
+	    alloclen++; /* "P" */
+	if (rhp->layer != 10)
+	    alloclen += sprintf(layerbuf, ",layer=%d", rhp->layer);
 	if (rhp->memo)
-	    alloclen += 1 /* space */ + strlen(memo_equals) + strlen(rhp->memo);
+	    alloclen += sizeof(memo_equals) - 1 + strlen(rhp->memo);
 	*arrp = (char *)zhalloc(alloclen * sizeof(char));
 	/*
 	 * On input we allow a space after the flags.
@@ -437,13 +463,14 @@ get_region_highlight(UNUSED(Param pm))
 	 * into three words, and then check the first to
 	 * see if there are flags.  However, it's arguable.
 	 */
-	sprintf(*arrp, "%s%s %s ",
+	offset = sprintf(*arrp, "%s%s ",
 		(rhp->flags & ZRH_PREDISPLAY) ? "P" : "",
-		digbuf1, digbuf2);
-	(void)output_highlight(rhp->atr, *arrp + strlen(*arrp));
+		digbuf);
+	(void)output_highlight(rhp->atr, rhp->atrmask, *arrp + offset);
 
+	if (rhp->layer != 10)
+	    strcat(*arrp, layerbuf);
 	if (rhp->memo) {
-	    strcat(*arrp, " ");
 	    strcat(*arrp, memo_equals);
 	    strcat(*arrp, rhp->memo);
 	}
@@ -452,12 +479,10 @@ get_region_highlight(UNUSED(Param pm))
     return retarr;
 }
 
-
 /*
  * The parameter system requires the pm argument, but this
  * may be NULL if called directly.
  */
-
 /**/
 void
 set_region_highlight(UNUSED(Param pm), char **aval)
@@ -516,7 +541,9 @@ set_region_highlight(UNUSED(Param pm), char **aval)
 	while (inblank(*strp))
 	    strp++;
 
-	strp = (char*) match_highlight(strp, &rhp->atr);
+	rhp->layer = 10; /* default */
+	strp = (char*) match_highlight(strp, &rhp->atr, &rhp->atrmask,
+		&rhp->layer);
 
 	while (inblank(*strp))
 	    strp++;
@@ -571,22 +598,6 @@ unset_region_highlight(Param pm, int exp)
 }
 
 
-/* The last attributes that were on. */
-static zattr lastatr;
-
-/*
- * Clear the last attributes that we set:  used when we're going
- * to be outputting stuff that shouldn't show up as text.
- */
-static void
-clearattributes(void)
-{
-    if (lastatr) {
-	settextattributes(TXT_ATTR_OFF_FROM_ON(lastatr));
-	lastatr = 0;
-    }
-}
-
 /*
  * Output a termcap capability, clearing any text attributes so
  * as not to mess up the display.
@@ -595,7 +606,8 @@ clearattributes(void)
 static void
 tcoutclear(int cap)
 {
-    clearattributes();
+    treplaceattrs((cap == TCCLEAREOL) ? prompt_attr : 0);
+    applytextattributes(0);
     tcout(cap);
 }
 
@@ -603,47 +615,20 @@ tcoutclear(int cap)
  * Output the character.  This must come from the new video
  * buffer, nbuf, since we access the multiword buffer nmwbuf
  * directly.
- *
- * curatrp may be NULL, otherwise points to an integer specifying
- * what attributes were turned on for a character output immediately
- * before, in order to optimise output of attribute changes.
  */
 
 /**/
 void
-zwcputc(const REFRESH_ELEMENT *c, zattr *curatrp)
+zwcputc(const REFRESH_ELEMENT *c)
 {
-    /*
-     * Safety: turn attributes off if last heard of turned on.
-     * This differs from *curatrp, which is an optimisation for
-     * writing lots of stuff at once.
-     */
 #ifdef MULTIBYTE_SUPPORT
     mbstate_t mbstate;
     int i;
     VARARR(char, mbtmp, MB_CUR_MAX + 1);
 #endif
 
-    if (lastatr & ~c->atr) {
-	/* Stuff on we don't want, turn it off */
-	settextattributes(TXT_ATTR_OFF_FROM_ON(lastatr & ~c->atr));
-	lastatr = 0;
-    }
-
-    /*
-     * Don't output "on" attributes in a string of characters with
-     * the same attributes.  Be careful in case a different colour
-     * needs setting.
-     */
-    if ((c->atr & TXT_ATTR_ON_MASK) &&
-	(!curatrp ||
-	 ((*curatrp & TXT_ATTR_ON_VALUES_MASK) !=
-	  (c->atr & TXT_ATTR_ON_VALUES_MASK)))) {
-	/* Record just the control flags we might need to turn off... */
-	lastatr = c->atr & TXT_ATTR_ON_MASK;
-	/* ...but set including the values for colour attributes */
-	settextattributes(c->atr & TXT_ATTR_ON_VALUES_MASK);
-    }
+    treplaceattrs(c->atr);
+    applytextattributes(0);
 
 #ifdef MULTIBYTE_SUPPORT
     if (c->atr & TXT_MULTIWORD_MASK) {
@@ -664,35 +649,15 @@ zwcputc(const REFRESH_ELEMENT *c, zattr *curatrp)
 #else
     fputc(c->chr, shout);
 #endif
-
-    /*
-     * Always output "off" attributes since we only turn off at
-     * the end of a chunk of highlighted text.
-     */
-    if (c->atr & TXT_ATTR_OFF_MASK) {
-	settextattributes(c->atr & TXT_ATTR_OFF_MASK);
-	lastatr &= ~((c->atr & TXT_ATTR_OFF_MASK) >> TXT_ATTR_OFF_ON_SHIFT);
-    }
-    if (curatrp) {
-	/*
-	 * Remember the current attributes:  those that are turned
-	 * on, less those that are turned off again.  Include
-	 * colour attributes here in case the colour changes to
-	 * another non-default one.
-	 */
-	*curatrp = (c->atr & TXT_ATTR_ON_VALUES_MASK) &
-	    ~((c->atr & TXT_ATTR_OFF_MASK) >> TXT_ATTR_OFF_ON_SHIFT);
-    }
 }
 
 static int
 zwcwrite(const REFRESH_STRING s, size_t i)
 {
     size_t j;
-    zattr curatr = 0;
 
     for (j = 0; j < i; j++)
-	zwcputc(s + j, &curatr);
+	zwcputc(s + j);
     return i; /* TODO something better for error indication */
 }
 
@@ -939,29 +904,6 @@ snextline(Rparams rpms)
     rpms->sen = rpms->s + winw;
 }
 
-
-/**/
-static void
-settextattributes(zattr atr)
-{
-    if (txtchangeisset(atr, TXTNOBOLDFACE))
-	tsetcap(TCALLATTRSOFF, 0);
-    if (txtchangeisset(atr, TXTNOSTANDOUT))
-	tsetcap(TCSTANDOUTEND, 0);
-    if (txtchangeisset(atr, TXTNOUNDERLINE))
-	tsetcap(TCUNDERLINEEND, 0);
-    if (txtchangeisset(atr, TXTBOLDFACE))
-	tsetcap(TCBOLDFACEBEG, 0);
-    if (txtchangeisset(atr, TXTSTANDOUT))
-	tsetcap(TCSTANDOUTBEG, 0);
-    if (txtchangeisset(atr, TXTUNDERLINE))
-	tsetcap(TCUNDERLINEBEG, 0);
-    if (txtchangeisset(atr, TXTFGCOLOUR|TXTNOFGCOLOUR))
-	set_colour_attribute(atr, COL_SEQ_FG, 0);
-    if (txtchangeisset(atr, TXTBGCOLOUR|TXTNOBGCOLOUR))
-	set_colour_attribute(atr, COL_SEQ_BG, 0);
-}
-
 #ifdef MULTIBYTE_SUPPORT
 /*
  * Add a multiword glyph at the screen location base.
@@ -1043,13 +985,12 @@ zrefresh(void)
     int tmppos;			/* t - tmpline				     */
     int tmpalloced;		/* flag to free tmpline when finished	     */
     int remetafy;		/* flag that zle line is metafied	     */
-    zattr txtchange;		/* attributes set after prompts              */
     int rprompt_off = 1;	/* Offset of rprompt from right of screen    */
     struct rparams rpms;
 #ifdef MULTIBYTE_SUPPORT
     int width;			/* width of wide character		     */
 #endif
-
+    const REFRESH_ELEMENT zr_pad = { ZWC(' '), prompt_attr };
 
     /* If this is called from listmatches() (indirectly via trashzle()), and *
      * that was called from the end of zrefresh(), then we don't need to do  *
@@ -1089,6 +1030,8 @@ zrefresh(void)
 	tmpll = zlell;
 	tmpalloced = 0;
     }
+
+    zle_set_cursorform();
 
     /* this will create region_highlights if it's still NULL */
     zle_set_highlight();
@@ -1192,9 +1135,7 @@ zrefresh(void)
 #endif
 	/* we probably should only have explicitly set attributes */
 	tsetcap(TCALLATTRSOFF, 0);
-	tsetcap(TCSTANDOUTEND, 0);
-	tsetcap(TCUNDERLINEEND, 0);
-	txtattrmask = 0;
+	txtcurrentattrs = txtpendingattrs = txtunknownattrs = 0;
 
 	if (trashedzle && !clearflag)
 	    reexpandprompt(); 
@@ -1218,9 +1159,11 @@ zrefresh(void)
 	    zputs(lpromptbuf, shout);
 	    if (lpromptwof == winw)
 		zputs("\n", shout);	/* works with both hasam and !hasam */
-	} else {
-	    txtchange = pmpt_attr;
-	    settextattributes(txtchange);
+	    /* lpromptbuf includes literal escapes so we need to update for it */
+	    txtcurrentattrs = txtpendingattrs = pmpt_attr;
+	    /* Unknown attributes remain so but if sequences were embedded
+	     * directly in the prompt, let's not needlessly reset them. */
+	    txtunknownattrs = 0;
 	}
 	if (clearflag) {
 	    zputc(&zr_cr);
@@ -1263,45 +1206,42 @@ zrefresh(void)
     rpms.s = nbuf[rpms.ln = 0] + lpromptw;
     rpms.sen = *nbuf + winw;
     for (t = tmpline, tmppos = 0; tmppos < tmpll; t++, tmppos++) {
-	unsigned ireg;
-	zattr base_atr_on = default_atr_on, base_atr_off = 0;
-	zattr all_atr_on, all_atr_off;
+	zattr base_attr = mixattrs(default_attr, default_mask, prompt_attr);
+	zattr all_attr = 0;
 	struct region_highlight *rhp;
+	int layer, nextlayer = 0;
 	/*
 	 * Calculate attribute based on region.
 	 */
-	for (ireg = 0, rhp = region_highlights;
-	     ireg < n_region_highlights;
-	     ireg++, rhp++) {
-	    int offset;
-	    if (rhp->flags & ZRH_PREDISPLAY)
-		offset = 0;	/* include predisplay in start end */
-	    else
-		offset = predisplaylen; /* increment over it */
-	    if (rhp->start + offset <= tmppos &&
-		tmppos < rhp->end + offset) {
-		if (rhp->atr & (TXTFGCOLOUR|TXTBGCOLOUR)) {
-		    /* override colour with later entry */
-		    base_atr_on = (base_atr_on & ~TXT_ATTR_ON_VALUES_MASK) |
-			rhp->atr;
-		} else {
-		    /* no colour set yet */
-		    base_atr_on |= rhp->atr;
+	do {
+	    unsigned ireg;
+	    layer = nextlayer;
+	    nextlayer = special_layer;
+	    for (ireg = 0, rhp = region_highlights;
+		ireg < n_region_highlights;
+		ireg++, rhp++) {
+		if (rhp->layer == layer) {
+		    int offset;
+		    if (rhp->flags & ZRH_PREDISPLAY)
+			offset = 0;	/* include predisplay in start end */
+		    else
+			offset = predisplaylen; /* increment over it */
+		    if (rhp->start + offset <= tmppos &&
+			tmppos < rhp->end + offset) {
+			base_attr = mixattrs(rhp->atr, rhp->atrmask, base_attr);
+			if (layer > special_layer)
+			    all_attr = mixattrs(rhp->atr, rhp->atrmask,
+				    all_attr);
+		    }
+		} else if (rhp->layer > layer &&
+			(rhp->layer < nextlayer || nextlayer <= layer)) {
+		    nextlayer = rhp->layer;
 		}
-		if (tmppos == rhp->end + offset - 1 ||
-		    tmppos == tmpll - 1)
-		    base_atr_off |= TXT_ATTR_OFF_FROM_ON(rhp->atr);
 	    }
-	}
-	if (special_atr_on & (TXTFGCOLOUR|TXTBGCOLOUR)) {
-	    /* keep colours from special attributes */
-	    all_atr_on = special_atr_on |
-		(base_atr_on & ~TXT_ATTR_COLOUR_ON_MASK);
-	} else {
-	    /* keep colours from standard attributes */
-	    all_atr_on = special_atr_on | base_atr_on;
-	}
-	all_atr_off = TXT_ATTR_OFF_FROM_ON(all_atr_on);
+	    if (special_layer == layer) {
+		all_attr = mixattrs(special_attr, special_mask, base_attr);
+	    }
+	} while (nextlayer > layer);
 
 	if (t == scs)			/* if cursor is here, remember it */
 	    rpms.nvcs = rpms.s - nbuf[rpms.nvln = rpms.ln];
@@ -1319,10 +1259,9 @@ zrefresh(void)
 	    } else {
 		do {
 		    rpms.s->chr = ZWC(' ');
-		    rpms.s->atr = base_atr_on;
+		    rpms.s->atr = base_attr;
 		    rpms.s++;
 		} while ((++t0) & 7);
-		rpms.s[-1].atr |= base_atr_off;
 	    }
 	}
 #ifdef MULTIBYTE_SUPPORT
@@ -1341,11 +1280,9 @@ zrefresh(void)
 		    rpms.s->chr = ZWC(' ');
 		    if (!started)
 			started = 1;
-		    rpms.s->atr = all_atr_on;
+		    rpms.s->atr = all_attr;
 		    rpms.s++;
 		} while (rpms.s < rpms.sen);
-		if (started)
-		    rpms.s[-1].atr |= all_atr_off;
 		if (nextline(&rpms, 1))
 		    break;
 		if (t == scs) {
@@ -1369,15 +1306,11 @@ zrefresh(void)
 		 * occurrence.
 		 */
 		rpms.s->chr = ZWC('?');
-		rpms.s->atr = all_atr_on | all_atr_off;
+		rpms.s->atr = all_attr;
 		rpms.s++;
 	    } else {
 		/* We can fit it without reaching the end of the line. */
-		/*
-		 * As we don't actually output the WEOF, we attach
-		 * any off attributes to the character itself.
-		 */
-		rpms.s->atr = base_atr_on | base_atr_off;
+		rpms.s->atr = base_attr;
 		if (ichars > 1) {
 		    /*
 		     * Glyph includes combining characters.
@@ -1393,7 +1326,7 @@ zrefresh(void)
 		while (--width > 0) {
 		    rpms.s->chr = WEOF;
 		    /* Not used, but be consistent... */
-		    rpms.s->atr = base_atr_on | base_atr_off;
+		    rpms.s->atr = base_attr;
 		    rpms.s++;
 		}
 	    }
@@ -1410,17 +1343,16 @@ zrefresh(void)
 #endif
 	    ) {	/* other control character */
 	    rpms.s->chr = ZWC('^');
-	    rpms.s->atr = all_atr_on;
+	    rpms.s->atr = all_attr;
 	    rpms.s++;
 	    if (rpms.s == rpms.sen) {
 		/* text wrapped */
-		rpms.s[-1].atr |= all_atr_off;
 		if (nextline(&rpms, 1))
 		    break;
 	    }
 	    rpms.s->chr = (((unsigned int)*t & ~0x80u) > 31) ?
 		ZWC('?') : (*t | ZWC('@'));
-	    rpms.s->atr = all_atr_on | all_atr_off;
+	    rpms.s->atr = all_attr;
 	    rpms.s++;
 	}
 #ifdef MULTIBYTE_SUPPORT
@@ -1432,7 +1364,6 @@ zrefresh(void)
 	    char dispchars[11];
 	    char *dispptr = dispchars;
 	    wchar_t wc;
-	    int started = 0;
 
 #ifdef __STDC_ISO_10646__
 	    if (ZSH_INVALID_WCHAR_TEST(*t)) {
@@ -1449,31 +1380,23 @@ zrefresh(void)
 		if (mbtowc(&wc, dispptr, 1) == 1 /* paranoia */)
 		{
 		    rpms.s->chr = wc;
-		    if (!started)
-			started = 1;
-		    rpms.s->atr = all_atr_on;
+		    rpms.s->atr = all_attr;
 		    rpms.s++;
 		    if (rpms.s == rpms.sen) {
 			/* text wrapped */
-			if (started) {
-			    rpms.s[-1].atr |= all_atr_off;
-			    started = 0;
-			}
 			if (nextline(&rpms, 1))
 			    break;
 		    }
 		}
 		dispptr++;
 	    }
-	    if (started)
-		rpms.s[-1].atr |= all_atr_off;
 	    if (*dispptr) /* nextline said stop processing */
 		break;
 	}
 #else
 	else {			/* normal character */
 	    rpms.s->chr = *t;
-	    rpms.s->atr = base_atr_on | base_atr_off;
+	    rpms.s->atr = base_attr;
 	    rpms.s++;
 	}
 #endif
@@ -1499,13 +1422,12 @@ zrefresh(void)
 
     if (statusline) {
 	int outll, outsz;
-	zattr all_atr_on, all_atr_off;
+	zattr all_attr;
 	char *statusdup = ztrdup(statusline);
 	ZLE_STRING_T outputline =
 	    stringaszleline(statusdup, 0, &outll, &outsz, NULL); 
 
-	all_atr_on = special_atr_on;
-	all_atr_off = TXT_ATTR_OFF_FROM_ON(all_atr_on);
+	all_attr = special_attr;
 
 	rpms.tosln = rpms.ln + 1;
 	nbuf[rpms.ln][winw + 1] = zr_zr;	/* text not wrapped */
@@ -1525,7 +1447,7 @@ zrefresh(void)
 		}
 		if (width > rpms.sen - rpms.s) {
 		    rpms.s->chr = ZWC('?');
-		    rpms.s->atr = all_atr_on | all_atr_off;
+		    rpms.s->atr = all_attr;
 		    rpms.s++;
 		} else {
 		    rpms.s->chr = *u;
@@ -1542,7 +1464,7 @@ zrefresh(void)
 #endif
 	    if (ZC_icntrl(*u)) { /* simplified processing in the status line */
 		rpms.s->chr = ZWC('^');
-		rpms.s->atr = all_atr_on;
+		rpms.s->atr = all_attr;
 		rpms.s++;
 		if (rpms.s == rpms.sen) {
 		    nbuf[rpms.ln][winw + 1] = zr_nl;/* text wrapped */
@@ -1550,7 +1472,7 @@ zrefresh(void)
 		}
 		rpms.s->chr = (((unsigned int)*u & ~0x80u) > 31)
 		    ? ZWC('?') : (*u | ZWC('@'));
-		rpms.s->atr = all_atr_on | all_atr_off;
+		rpms.s->atr = all_attr;
 		rpms.s++;
 	    } else {
 		rpms.s->chr = *u;
@@ -1585,7 +1507,7 @@ zrefresh(void)
 	rpms.sen = rpms.s + winw - 7;
 	for (; rpms.s < rpms.sen; rpms.s++) {
 	    if (rpms.s->chr == ZWC('\0')) {
-		ZR_memset(rpms.s, zr_sp, rpms.sen - rpms.s);
+		ZR_memset(rpms.s, zr_pad, rpms.sen - rpms.s);
 		/* make sure we don't trigger the WEOF test */
 		rpms.sen->chr = ZWC('\0');
 		break;
@@ -1603,6 +1525,8 @@ zrefresh(void)
 	}
 #endif
 	ZR_memcpy(rpms.sen, zr_end_ellipsis, ZR_END_ELLIPSIS_SIZE);
+	rpms.sen[0].atr = prompt_attr;
+	rpms.sen[1].atr = ellipsis_attr;
 #ifdef MULTIBYTE_SUPPORT
 	/* Extend to the end if we backed off for a wide character */
 	if (extra_ellipsis) {
@@ -1638,6 +1562,7 @@ zrefresh(void)
 	}
 #endif
 	ZR_memcpy(rpms.sen, zr_mid_ellipsis1, ZR_MID_ELLIPSIS1_SIZE);
+	rpms.sen[1].atr = ellipsis_attr;
 	rpms.sen += ZR_MID_ELLIPSIS1_SIZE;
 #ifdef MULTIBYTE_SUPPORT
 	/* Extend if we backed off for a wide character */
@@ -1647,6 +1572,7 @@ zrefresh(void)
 	}
 #endif
 	ZR_memcpy(rpms.sen, zr_mid_ellipsis2, ZR_MID_ELLIPSIS2_SIZE);
+	rpms.sen[1].atr = prompt_attr;
 	nbuf[rpms.tosln][winw] = nbuf[rpms.tosln][winw + 1] = zr_zr;
     }
 
@@ -1679,7 +1605,9 @@ zrefresh(void)
 	t0 = winw - lpromptw;
 	t0 = t0 > ZR_START_ELLIPSIS_SIZE ? ZR_START_ELLIPSIS_SIZE : t0;
 	ZR_memcpy(nbuf[0] + lpromptw, zr_start_ellipsis, t0);
-	ZR_memset(nbuf[0] + lpromptw + t0, zr_sp, winw - t0 - lpromptw);
+	(*nbuf + lpromptw)->atr = ellipsis_attr;
+	ZR_memset(nbuf[0] + lpromptw + t0, zr_pad, winw - t0 - lpromptw);
+	(*nbuf + lpromptw + t0)->atr = prompt_attr;
 	nbuf[0][winw] = nbuf[0][winw + 1] = zr_zr;
     }
 
@@ -1725,9 +1653,9 @@ zrefresh(void)
 
     /* output the right-prompt if appropriate */
 	if (put_rpmpt && !iln && !oput_rpmpt) {
-	    zattr attrchange;
-
 	    moveto(0, winw - rprompt_off - rpromptw);
+	    treplaceattrs(pmpt_attr);
+	    applytextattributes(0);
 	    zputs(rpromptbuf, shout);
 	    if (rprompt_off) {
 		vcs = winw - rprompt_off;
@@ -1735,39 +1663,7 @@ zrefresh(void)
 		zputc(&zr_cr);
 		vcs = 0;
 	    }
-	/* reset character attributes to that set by the main prompt */
-	    txtchange = pmpt_attr;
-	    /*
-	     * Keep attributes that have actually changed,
-	     * which are ones off in rpmpt_attr and on in
-	     * pmpt_attr, and vice versa.
-	     */
-	    attrchange = txtchange &
-		(TXT_ATTR_OFF_FROM_ON(rpmpt_attr) |
-		 TXT_ATTR_ON_FROM_OFF(rpmpt_attr));
-	    /*
-	     * Careful in case the colour changed.
-	     */
-	    if (txtchangeisset(txtchange, TXTFGCOLOUR) &&
-		(!txtchangeisset(rpmpt_attr, TXTFGCOLOUR) ||
-		 ((txtchange ^ rpmpt_attr) & TXT_ATTR_FG_COL_MASK)))
-	    {
-		attrchange |=
-		    txtchange & (TXTFGCOLOUR | TXT_ATTR_FG_COL_MASK);
-	    }
-	    if (txtchangeisset(txtchange, TXTBGCOLOUR) &&
-		(!txtchangeisset(rpmpt_attr, TXTBGCOLOUR) ||
-		 ((txtchange ^ rpmpt_attr) & TXT_ATTR_BG_COL_MASK)))
-	    {
-		attrchange |=
-		    txtchange & (TXTBGCOLOUR | TXT_ATTR_BG_COL_MASK);
-	    }
-	    /*
-	     * Now feed these changes into the usual function,
-	     * if necessary.
-	     */
-	    if (attrchange)
-		settextattributes(attrchange);
+	    txtcurrentattrs = txtpendingattrs = rpmpt_attr;
 	}
     }
 
@@ -1780,16 +1676,12 @@ individually */
 	    refreshline(iln);
     }
 
-/* reset character attributes */
-    if (clearf && postedit) {
-	if ((txtchange = pmpt_attr ? pmpt_attr : rpmpt_attr))
-	    settextattributes(txtchange);
-    }
     clearf = 0;
     oput_rpmpt = put_rpmpt;
 
 /* move to the new cursor position */
     moveto(rpms.nvln, rpms.nvcs);
+    cursor_form();
 
 /* swap old and new buffers - better than freeing/allocating every time */
     bufswap();
@@ -1864,6 +1756,7 @@ refreshline(int ln)
 	ins_last,		/* insert pushed last character off line */
 	nllen, ollen,		/* new and old line buffer lengths	 */
 	rnllen;			/* real new line buffer length		 */
+    const REFRESH_ELEMENT zr_pad = { ZWC(' '), prompt_attr };
 
 /* 0: setup */
     nl = nbuf[ln];
@@ -1910,7 +1803,7 @@ refreshline(int ln)
     } else if (ollen > nllen) { /* make new line at least as long as old */
 	p1 = zhalloc((ollen + 1) * sizeof(*p1));
 	ZR_memcpy(p1, nl, nllen);
-	ZR_memset(p1 + nllen, zr_sp, ollen - nllen);
+	ZR_memset(p1 + nllen, zr_pad, ollen - nllen);
 	p1[ollen] = zr_zr;
 	nl = p1;
 	nllen = ollen;
@@ -1926,13 +1819,18 @@ refreshline(int ln)
     else {
 	col_cleareol = -1;
 	if (tccan(TCCLEAREOL) && (nllen == winw || put_rpmpt != oput_rpmpt)) {
-	    for (i = nllen; i && ZR_equal(zr_sp, nl[i - 1]); i--)
+	    zattr a = nl[nllen - 1].atr;
+	    for (i = nllen; i && nl[i - 1].chr == ' ' && nl[i - 1].atr == a; i--)
 		;
-	    for (j = ollen; j && ZR_equal(ol[j - 1], zr_sp); j--)
-		;
-	    if ((j > i + tclen[TCCLEAREOL])	/* new buf has enough spaces */
-		|| (nllen == winw && ZR_equal(zr_sp, nl[winw - 1])))
+	    if (nllen == winw && i < nllen) {
 		col_cleareol = i;
+            } else {
+		a = ol[ollen - 1].atr;
+		for (j = ollen; j && ol[j - 1].chr == ' ' && ol[j - 1].atr == a; j--)
+		    ;
+		if ((j > i + tclen[TCCLEAREOL]))	/* new buf has enough spaces */
+		    col_cleareol = i;
+	    }
 	}
     }
 
@@ -1984,8 +1882,6 @@ refreshline(int ln)
 /* 3: main display loop - write out the buffer using whatever tricks we can */
 
     for (;;) {
-	zattr now_off;
-
 #ifdef MULTIBYTE_SUPPORT
 	if ((!nl->chr || nl->chr != WEOF) && (!ol->chr || ol->chr != WEOF)) {
 #endif
@@ -2040,7 +1936,7 @@ refreshline(int ln)
 		else {
 		    vcs += i;
 		    while (i-- > 0)
-			zputc(&zr_sp);
+			zputc(&zr_pad);
 		}
 		return;
 	    }
@@ -2084,10 +1980,11 @@ refreshline(int ln)
 			    /*
 			     * Some terminals will output the current
 			     * attributes into cells added at the end by
-			     * deletions, so turn off text attributes.
+			     * deletions, so apply the text area attributes.
 			     */
 			    if (first) {
-				clearattributes();
+				treplaceattrs(prompt_attr);
+				applytextattributes(0);
 				first = 0;
 			    }
 			    tc_delchars(i);
@@ -2176,13 +2073,8 @@ refreshline(int ln)
 	    break;
 	do {
 #endif
-	    /*
-	     * If an attribute was on here but isn't any more,
-	     * output the sequence to turn it off.
-	     */
-	    now_off = ol->atr & ~nl->atr & TXT_ATTR_ON_MASK;
-	    if (now_off)
-		settextattributes(TXT_ATTR_OFF_FROM_ON(now_off));
+	    treplaceattrs(nl->atr);
+	    applytextattributes(0);
 
 	    /*
 	     * This is deliberately called if nl->chr is WEOF
@@ -2560,8 +2452,8 @@ singlerefresh(ZLE_STRING_T tmpline, int tmpll, int tmpcs)
 
     for (t0 = 0; t0 < tmpll; t0++) {
 	unsigned ireg;
-	zattr base_atr_on = 0, base_atr_off = 0;
-	zattr all_atr_on, all_atr_off;
+	zattr base_attr = mixattrs(default_attr, default_attr, prompt_attr);
+	zattr all_attr;
 	struct region_highlight *rhp;
 	/*
 	 * Calculate attribute based on region.
@@ -2576,38 +2468,28 @@ singlerefresh(ZLE_STRING_T tmpline, int tmpll, int tmpcs)
 		offset = predisplaylen; /* increment over it */
 	    if (rhp->start + offset <= t0 &&
 		t0 < rhp->end + offset) {
-		if (base_atr_on & (TXTFGCOLOUR|TXTBGCOLOUR)) {
+		if (base_attr & (TXTFGCOLOUR|TXTBGCOLOUR)) {
 		    /* keep colour already set */
-		    base_atr_on |= rhp->atr & ~TXT_ATTR_COLOUR_ON_MASK;
+		    base_attr |= rhp->atr & ~TXT_ATTR_COLOUR_MASK;
 		} else {
 		    /* no colour set yet */
-		    base_atr_on |= rhp->atr;
+		    base_attr |= rhp->atr;
 		}
-		if (t0 == rhp->end + offset - 1 ||
-		    t0 == tmpll - 1)
-		    base_atr_off |= TXT_ATTR_OFF_FROM_ON(rhp->atr);
 	    }
 	}
-	if (special_atr_on & (TXTFGCOLOUR|TXTBGCOLOUR)) {
-	    /* keep colours from special attributes */
-	    all_atr_on = special_atr_on |
-		(base_atr_on & ~TXT_ATTR_COLOUR_ON_MASK);
-	} else {
-	    /* keep colours from standard attributes */
-	    all_atr_on = special_atr_on | base_atr_on;
-	}
-	all_atr_off = TXT_ATTR_OFF_FROM_ON(all_atr_on);
+	all_attr = mixattrs(special_attr, special_mask, base_attr);
 
+	if (t0 == tmpcs)
+	    nvcs = vp - vbuf;
 	if (tmpline[t0] == ZWC('\t')) {
 	    for (*vp++ = zr_sp; (vp - vbuf) & 7; )
 		*vp++ = zr_sp;
-	    vp[-1].atr |= base_atr_off;
 	} else if (tmpline[t0] == ZWC('\n')) {
 	    vp->chr = ZWC('\\');
-	    vp->atr = all_atr_on;
+	    vp->atr = all_attr;
 	    vp++;
 	    vp->chr = ZWC('n');
-	    vp->atr = all_atr_on | all_atr_off;
+	    vp->atr = all_attr;
 	    vp++;
 #ifdef MULTIBYTE_SUPPORT
 	} else if (WC_ISPRINT(tmpline[t0]) &&
@@ -2623,7 +2505,7 @@ singlerefresh(ZLE_STRING_T tmpline, int tmpll, int tmpcs)
 		}
 	    } else
 		ichars = 1;
-	    vp->atr = base_atr_on | base_atr_off;
+	    vp->atr = base_attr;
 	    if (ichars > 1)
 		addmultiword(vp, tmpline+t0, ichars);
 	    else
@@ -2631,7 +2513,7 @@ singlerefresh(ZLE_STRING_T tmpline, int tmpll, int tmpcs)
 	    vp++;
 	    while (--width > 0) {
 		vp->chr = WEOF;
-		vp->atr = base_atr_on | base_atr_off;
+		vp->atr = base_attr;
 		vp++;
 	    }
 	    t0 += ichars - 1;
@@ -2641,14 +2523,14 @@ singlerefresh(ZLE_STRING_T tmpline, int tmpll, int tmpcs)
 		   && (unsigned)tmpline[t0] <= 0xffU
 #endif
 		   ) {
-	    ZLE_INT_T t = tmpline[++t0];
+	    ZLE_INT_T t = tmpline[t0];
 
 	    vp->chr = ZWC('^');
-	    vp->atr = all_atr_on;
+	    vp->atr = all_attr;
 	    vp++;
 	    vp->chr = (((unsigned int)t & ~0x80u) > 31) ?
 		ZWC('?') : (t | ZWC('@'));
-	    vp->atr = all_atr_on | all_atr_off;
+	    vp->atr = all_attr;
 	    vp++;
 	}
 #ifdef MULTIBYTE_SUPPORT
@@ -2656,7 +2538,6 @@ singlerefresh(ZLE_STRING_T tmpline, int tmpll, int tmpcs)
 	    char dispchars[11];
 	    char *dispptr = dispchars;
 	    wchar_t wc;
-	    int started = 0;
 
 	    if ((unsigned)tmpline[t0] > 0xffffU) {
 		sprintf(dispchars, "<%.08x>", (unsigned)tmpline[t0]);
@@ -2666,25 +2547,19 @@ singlerefresh(ZLE_STRING_T tmpline, int tmpll, int tmpcs)
 	    while (*dispptr) {
 		if (mbtowc(&wc, dispptr, 1) == 1 /* paranoia */) {
 		    vp->chr = wc;
-		    if (!started)
-			started = 1;
-		    vp->atr = all_atr_on;
+		    vp->atr = all_attr;
 		    vp++;
 		}
 		dispptr++;
 	    }
-	    if (started)
-		vp[-1].atr |= all_atr_off;
 	}
 #else
 	else {
 	    vp->chr = tmpline[t0];
-	    vp->atr = base_atr_on | base_atr_off;
+	    vp->atr = base_attr;
 	    vp++;
 	}
 #endif
-	if (t0 == tmpcs)
-	    nvcs = vp - vbuf - 1;
     }
     if (t0 == tmpcs)
 	nvcs = vp - vbuf;
@@ -2699,11 +2574,11 @@ singlerefresh(ZLE_STRING_T tmpline, int tmpll, int tmpcs)
     }
     if (winpos) {
 	vbuf[winpos].chr = ZWC('<');	/* line continues to the left */
-	vbuf[winpos].atr = 0;
+	vbuf[winpos].atr = ellipsis_attr;
     }
     if ((int)ZR_strlen(vbuf + winpos) > (winw - hasam)) {
 	vbuf[winpos + winw - hasam - 1].chr = ZWC('>');	/* line continues to right */
-	vbuf[winpos + winw - hasam - 1].atr = 0;
+	vbuf[winpos + winw - hasam - 1].atr = ellipsis_attr;
 	vbuf[winpos + winw - hasam] = zr_zr;
     }
     ZR_strcpy(nbuf[0], vbuf + winpos);
@@ -2854,4 +2729,6 @@ zle_refresh_finish(void)
 	region_highlights = NULL;
 	n_region_highlights = 0;
     }
+
+    free_cursor_forms();
 }

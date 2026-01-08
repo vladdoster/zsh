@@ -105,9 +105,10 @@ case $OSTYPE in
     bsdarg+=( 'M[extract values from specified core]' )
   ;|
   linux-gnu|netbsd*) bsdarg+=( 'k[specify sort order]' ) ;|
+  linux-gnu|openbsd*) bsd+=( 'f[show process hierarchy]' ) ;|
+  darwin*|freebsd*|netbsd*) bsdarg+=( '*G[select processes by real group]' ) ;|
   darwin*|freebsd*)
     bsd+=( 'X[skip processes with no controlling terminal]' )
-    bsdarg+=( '*G[select processes by real group]' )
   ;|
   freebsd*|dragonfly*)
     bsd+=( 'f[show command and environment for swapped out processes]' )
@@ -162,13 +163,16 @@ case $OSTYPE in
       '(-N --deselect)'{-N,--deselect}'[negate selection: all processes except those selected]'
       '*-C[select processes by command name]:command:_sequence -s , _command_names -e'
       '*--ppid[select processes by parent process ID]:parent process:_sequence -S , _pids'
+      '(-D --date-format)'{-D,--date-format=}'[set the date format of the lstart field to format]:format:_strftime'
       '(-f)-F[extra full format listing]'
       '--context[show SELinux security context format]'
       '-M[show security data]'
       '(--forest -H)'{--forest,-H}'[show process hierarchy]'
+      '-P[add psr column]'
       '--headers[repeat header lines, one per page of output]'
       '(--cols --columns --width)'{--cols,--columns,--width}'[set screen width]:width'
       '(--lines --rows)'{--lines,--rows}'[set screen height]'
+      '--signames[display signal masks using signal names]'
       '--cumulative[include child process data with the parent]'
       '-n[set namelist file for WCHAN display]:file:_files'
       '(--no-headers --no-heading)'{--no-headers,--no-heading}'[suppress headers]'
@@ -188,7 +192,6 @@ case $OSTYPE in
     done
     bsd+=(
       'c[show true command name]'
-      'f[show process hierarchy]'
       'h[suppress header]'
       'm[show threads after processes]'
       'n[numeric output for WCHAN and USER]'

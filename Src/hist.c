@@ -34,25 +34,25 @@
  * word control. */
 
 /**/
-mod_export int (*hgetc) _((void));
+mod_export int (*hgetc) (void);
 
 /**/
-void (*hungetc) _((int));
+void (*hungetc) (int);
 
 /**/
-void (*hwaddc) _((int));
+void (*hwaddc) (int);
 
 /**/
-void (*hwbegin) _((int));
+void (*hwbegin) (int);
 
 /**/
-void (*hwabort) _((void));
+void (*hwabort) (void);
 
 /**/
-void (*hwend) _((void));
+void (*hwend) (void);
 
 /**/
-void (*addtoline) _((int));
+void (*addtoline) (int);
 
 /* != 0 means history substitution is turned off */
  
@@ -163,6 +163,11 @@ char *hsubl;
 /**/
 char *hsubr;
  
+/* state of histsubstpattern at last substitution */
+
+/**/
+int hsubpatopt;
+
 /* pointer into the history line */
  
 /**/
@@ -624,7 +629,7 @@ histsubchar(int c)
 	    return substfailed();
 	if (!hsubl)
 	    return -1;
-	if (subst(&sline, hsubl, hsubr, gbal))
+	if (subst(&sline, hsubl, hsubr, gbal, 0))
 	    return substfailed();
     } else {
 	/* Line doesn't begin ^foo^bar */
@@ -831,7 +836,7 @@ histsubchar(int c)
 	    if ((c = ingetc()) == 'g') {
 		gbal = 1;
 		c = ingetc();
-		if (c != 's' && c != '&') {
+		if (c != 's' && c != 'S' && c != '&') {
 		    zerr("'s' or '&' modifier expected after 'g'");
 		    return -1;
 		}
@@ -891,11 +896,13 @@ histsubchar(int c)
 		}
 		break;
 	    case 's':
+	    case 'S':
+		hsubpatopt = (c == 'S');
 		if (getsubsargs(sline, &gbal, &cflag))
 		    return -1; /* fall through */
 	    case '&':
 		if (hsubl && hsubr) {
-		    if (subst(&sline, hsubl, hsubr, gbal))
+		    if (subst(&sline, hsubl, hsubr, gbal, hsubpatopt))
 			return substfailed();
 		} else {
 		    herrflush();
@@ -1352,7 +1359,8 @@ putoldhistentryontop(short keep_going)
 	do {
 	    if (max_unique_ct-- <= 0 || he == hist_ring) {
 		max_unique_ct = 0;
-		he = hist_ring->down;
+		if (hist_ring)
+		    he = hist_ring->down;
 		next = hist_ring;
 		break;
 	    }
@@ -1360,12 +1368,16 @@ putoldhistentryontop(short keep_going)
 	    next = he->down;
 	} while (!(he->node.flags & HIST_DUP));
     }
-    if (he != hist_ring->down) {
+    /* Is it really possible for hist_ring to be NULL here? */
+    if (he && (!hist_ring || he != hist_ring->down)) {
 	he->up->down = he->down;
 	he->down->up = he->up;
 	he->up = hist_ring;
-	he->down = hist_ring->down;
-	hist_ring->down = he->down->up = he;
+	if (hist_ring) {
+	    he->down = hist_ring->down;
+	    hist_ring->down = he;
+	}
+	he->down->up = he;
     }
     hist_ring = he;
 }
@@ -1461,7 +1473,7 @@ should_ignore_line(Eprog prog)
 mod_export int
 hend(Eprog prog)
 {
-    int flag, hookret, stack_pos = histsave_stack_pos;
+    int flag, hookret = 0, stack_pos = histsave_stack_pos;
     /*
      * save:
      * 0: don't save
@@ -1643,12 +1655,17 @@ hend(Eprog prog)
 void
 ihwbegin(int offset)
 {
+    int pos = hptr - chline + offset;
     if (stophist == 2 || (histactive & HA_INWORD) ||
 	(inbufflags & (INP_ALIAS|INP_HIST)) == INP_ALIAS)
 	return;
     if (chwordpos%2)
 	chwordpos--;	/* make sure we're on a word start, not end */
-    chwords[chwordpos++] = hptr - chline + offset;
+    DPUTS1(pos < 0, "History word position < 0 in %s",
+	   dupstrpfx(chline, hptr-chline));
+    if (pos < 0)
+	pos = 0;
+    chwords[chwordpos++] = pos;
 }
 
 /* Abort current history word, not needed */
@@ -1783,6 +1800,11 @@ getargspec(int argc, int marg, int evset)
 	ret = 0;
 	while (idigit(c)) {
 	    ret = ret * 10 + c - '0';
+	    if (ret < 0) {
+		herrflush();
+		zerr("no such word in event");
+		return -2;
+	    }
 	    c = ingetc();
 	}
 	inungetc(c);
@@ -1977,6 +1999,7 @@ chrealpath(char **junkptr, char mode, int use_heap)
     if (**junkptr != '/')
 	return 0;
 
+    untokenize(*junkptr);
     unmetafy(*junkptr, NULL);
 
     lastpos = strend(*junkptr);
@@ -2235,7 +2258,7 @@ casemodify(char *str, int how)
 		char *mbptr;
 
 		for (mbptr = mbstr; mbptr < mbstr + len2; mbptr++) {
-		    if (imeta(STOUC(*mbptr))) {
+		    if (imeta((unsigned char) *mbptr)) {
 			*ptr2++ = Meta;
 			*ptr2++ = *mbptr ^ 32;
 		    } else
@@ -2254,10 +2277,10 @@ casemodify(char *str, int how)
 	    int c;
 	    int mod = 0;
 	    if (*str == Meta) {
-		c = STOUC(str[1] ^ 32);
+		c = (unsigned char) (str[1] ^ 32);
 		str += 2;
 	    } else
-		c = STOUC(*str++);
+		c = (unsigned char) *str++;
 	    switch (how) {
 	    case CASMOD_LOWER:
 		if (isupper(c)) {
@@ -2310,7 +2333,7 @@ casemodify(char *str, int how)
 
 /**/
 int
-subst(char **strptr, char *in, char *out, int gbal)
+subst(char **strptr, char *in, char *out, int gbal, int forcepat)
 {
     char *str = *strptr, *substcut, *sptr;
     int off, inlen, outlen;
@@ -2318,7 +2341,7 @@ subst(char **strptr, char *in, char *out, int gbal)
     if (!*in)
 	in = str, gbal = 0;
 
-    if (isset(HISTSUBSTPATTERN)) {
+    if (isset(HISTSUBSTPATTERN) || forcepat) {
 	int fl = SUB_LONG|SUB_REST|SUB_RETFAIL;
 	char *oldin = in;
 	if (gbal)
@@ -2395,7 +2418,7 @@ convamps(char *out, char *in, int inlen)
 }
 
 /**/
-mod_export void
+static void
 checkcurline(Histent he)
 {
     if (he->histnum == curhist && (histactive & HA_ACTIVE)) {
@@ -2821,11 +2844,12 @@ readhistfile(char *fn, int err, int readflags)
 	     */
 	    if (uselex || remeta)
 		freeheap();
-	    if (errflag & ERRFLAG_INT) {
-		/* Can't assume fast read next time if interrupted. */
-		lasthist.interrupted = 1;
+	    if (errflag & ERRFLAG_INT)
 		break;
-	    }
+	}
+	if (errflag & ERRFLAG_INT) {
+	    /* Can't assume fast read next time if interrupted. */
+	    lasthist.interrupted = 1;
 	}
 	if (start && readflags & HFILE_USE_OPTIONS) {
 	    zsfree(lasthist.text);
@@ -2874,9 +2898,9 @@ flockhistfile(char *fn, int keep_trying)
     /*
      * Timeout is ten seconds.
      */
-    end_time = time(NULL) + (time_t)10;
+    end_time = zmonotime(NULL) + (time_t)10;
     while (fcntl(flock_fd, F_SETLKW, &lck) == -1) {
-	if (!keep_trying || time(NULL) >= end_time ||
+	if (!keep_trying || zmonotime(NULL) >= end_time ||
 	    /*
 	     * Randomise wait to minimise clashes with shells exiting at
 	     * the same time.
@@ -3091,7 +3115,9 @@ savehistfile(char *fn, int err, int writeflags)
 		hist_ignore_all_dups |= isset(HISTSAVENODUPS);
 		readhistfile(fn, err, 0);
 		hist_ignore_all_dups = isset(HISTIGNOREALLDUPS);
-		if (histlinect)
+		if (errflag & ERRFLAG_INT)
+		    ret = -1;
+		else if (histlinect)
 		    savehistfile(fn, err, 0);
 
 		pophiststack();
@@ -3120,7 +3146,7 @@ static int lockhistct;
 static int
 checklocktime(char *lockfile, long *sleep_usp, time_t then)
 {
-    time_t now = time(NULL);
+    time_t now = zmonotime(NULL);
 
     if (now + 10 < then) {
 	/* File is more than 10 seconds in the future? */
@@ -3536,9 +3562,8 @@ bufferwords(LinkList list, char *buf, int *index, int flags)
 	} else if (buf) {
 	    if (IS_REDIROP(tok) && tokfd >= 0) {
 		char b[20];
-
-		sprintf(b, "%d%s", tokfd, tokstrings[tok]);
-		addlinknode(list, dupstring(b));
+		int l = sprintf(b, "%d%s", tokfd, tokstrings[tok]);
+		addlinknode(list, dupstring_wlen(b, l));
 		num++;
 	    } else if (tok != NEWLIN) {
 		addlinknode(list, dupstring(tokstrings[tok]));
@@ -3791,8 +3816,14 @@ histsplitwords(char *lineptr, short **wordsp, int *nwordsp, int *nwordposp,
 			zrealloc(words, nwords*sizeof(*words));
 		}
 		words[nwordpos++] = lineptr - start;
-		while (*lineptr && !inblank(*lineptr))
-		    lineptr++;
+		while (*lineptr) {
+		    if (*lineptr == Meta && lineptr[1])
+			lineptr += 2;
+		    else if (!inblank(*lineptr))
+			lineptr++;
+		    else
+			break;
+		}
 		words[nwordpos++] = lineptr - start;
 	    }
 	} while (*lineptr);

@@ -163,9 +163,9 @@ bin_zprof(UNUSED(char *nam), UNUSED(char **args), Options ops, UNUSED(int func))
 	*ap = NULL;
 
 	qsort(fs, ncalls, sizeof(f),
-	      (int (*) _((const void *, const void *))) cmpsfuncs);
+	      (int (*) (const void *, const void *)) cmpsfuncs);
 	qsort(as, narcs, sizeof(a),
-	      (int (*) _((const void *, const void *))) cmpparcs);
+	      (int (*) (const void *, const void *)) cmpparcs);
 
 	printf("num  calls                time                       self            name\n-----------------------------------------------------------------------------------\n");
 	for (fp = fs, i = 1; *fp; fp++, i++) {
@@ -179,7 +179,7 @@ bin_zprof(UNUSED(char *nam), UNUSED(char **args), Options ops, UNUSED(int func))
 		   (*fp)->name);
 	}
 	qsort(fs, ncalls, sizeof(f),
-	      (int (*) _((const void *, const void *))) cmptfuncs);
+	      (int (*) (const void *, const void *)) cmptfuncs);
 
 	for (fp = fs; *fp; fp++) {
 	    printf("\n-----------------------------------------------------------------------------------\n\n");
@@ -239,8 +239,7 @@ zprof_wrapper(Eprog prog, FuncWrap w, char *name)
     struct sfunc sf, *sp;
     Pfunc f = NULL;
     Parc a = NULL;
-    struct timeval tv;
-    struct timezone dummy;
+    struct timespec ts;
     double prev = 0, now;
     char *name_for_lookups;
 
@@ -278,19 +277,19 @@ zprof_wrapper(Eprog prog, FuncWrap w, char *name)
         stack = &sf;
 
         f->calls++;
-        tv.tv_sec = tv.tv_usec = 0;
-        gettimeofday(&tv, &dummy);
-        sf.beg = prev = ((((double) tv.tv_sec) * 1000.0) +
-                         (((double) tv.tv_usec) / 1000.0));
+        ts.tv_sec = ts.tv_nsec = 0;
+        zgettime_monotonic_if_available(&ts);
+        sf.beg = prev = ((((double) ts.tv_sec) * 1000.0) +
+                         (((double) ts.tv_nsec) / 1000000.0));
     }
     runshfunc(prog, w, name);
     if (active) {
         if (zprof_module && !(zprof_module->node.flags & MOD_UNLOAD)) {
-            tv.tv_sec = tv.tv_usec = 0;
-            gettimeofday(&tv, &dummy);
+            ts.tv_sec = ts.tv_nsec = 0;
+            zgettime_monotonic_if_available(&ts);
 
-            now = ((((double) tv.tv_sec) * 1000.0) +
-                   (((double) tv.tv_usec) / 1000.0));
+            now = ((((double) ts.tv_sec) * 1000.0) +
+                   (((double) ts.tv_nsec) / 1000000.0));
             f->self += now - sf.beg;
             for (sp = sf.prev; sp && sp->p != f; sp = sp->prev);
             if (!sp)

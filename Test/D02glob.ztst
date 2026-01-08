@@ -541,6 +541,23 @@
 >No file beginning with z
 >Normal string if nullglob not set
 
+  echo > glob.tmp/nonexistent(N)
+1:redirect to a non-matching pattern is an error even with flag (N)
+?(eval):1: redirection failed (no match): glob.tmp/nonexistent(N)
+
+  (
+    setopt extended_glob no_nomatch
+    cd glob.tmp
+    [[ a(#q.) == a ]] && print lhs 1
+    [[ a(#q/) == a ]] && print lhs 2
+    [[ z == *(#q.) ]] && print rhs 1 # (#q...) ignored
+    [[ z == *(#q/) ]] && print rhs 2 # (#q...) ignored
+  )
+0:(#q) glob expansion only on lhs of pattern-match conditions
+>lhs 1
+>rhs 1
+>rhs 2
+
  (){ print $#@ } glob.tmp/dir*(Y1)
  (){ print $#@ } glob.tmp/file*(NY1)
  (){ [[ "$*" == */dir?\ */dir? ]] && print Returns matching filenames } glob.tmp/dir*(Y2)
@@ -694,6 +711,10 @@
 0:modifier ':P' with path too long
 >16001
 
+ print -r ${${:-/a-b=c}:P}
+0:modifier ':P' with tokenised input
+>/a-b=c
+
  foo=a
  value="ac"
  print ${value//[${foo}b-z]/x}
@@ -816,6 +837,79 @@
 0:the ':P' modifier handles symlink loops other than the trivial case
 *>*/glob.tmp/(flip|flop)
 *>*/glob.tmp/(flip|flop)/trailing/components
+
+# The following set test an obscure problem with branches followed by
+# exclusions that shows up when the exclusion matches against
+# something other than the complete test string, hence the complicated
+# double negative.
+  [[ ab = (|a*)~^(*b) ]]
+0:Regression test for exclusion after branches: empty first alternative
+
+  [[ ab = (b|a*)~^(*b) ]]
+0:Regression test for exclusion after branches: non-empty first alternative
+
+  [[ ab = (b*|a*)~^(*b) ]]
+0:Regression test for exclusion after branches: full length first alternative
+
+# Corresponding tests where the exclusion should succeed, so the
+# match fails.  It's hard to know how to provoke bugs here...
+  [[ abc = (|a*)~^(*b) ]]
+1:Regression test for exclusion after branches: failure case 1
+
+  [[ abc = (b|a*)~^(*b) ]]
+1:Regression test for exclusion after branches: failure case 2
+
+  [[ abc = (b*|a*)~^(*b) ]]
+1:Regression test for exclusion after branches: failure case 3
+
+  (
+    setopt extended_glob
+    cd glob.tmp
+    qual=.
+    echo [a](.)   [a]('.')   [a](".")   [a](\.)   [a]($qual)   [a]("$qual")
+    echo [a](#q.) [a](#q'.') [a](#q".") [a](#q\.) [a](#q$qual) [a](#q"$qual")
+    qual='(#q.)'; echo [a]$~qual
+    qual='(#';    echo [a]${~qual}q.${:-)}
+    qual='(#q';   echo [a]${~qual}.${:-)}
+  )
+0:general glob qualifier quoting and expansion
+>a a a a a a
+>a a a a a a
+>a
+>a
+>a
+
+  (
+    setopt extended_glob
+    cd glob.tmp
+    s='*' quals=(
+      '(#qe:"REPLY=*":)'       '(#qe":REPLY=*:")'       '(#qe:REPLY=\*:)'
+      '(#qe:"reply=( \*  )":)' '(#qe":reply=( \*  ):")' '(#qe:reply=( \\\* ):)'
+      '(#qe|"reply=( \*  )"|)' '(#qe"|reply=( \*  )|")' '(#qe|reply=( \\\* )|)'
+      '(#qe?"reply=( \*  )"?)' '(#qe"?reply=( \*  )?")' '(#qe?reply=( \\\* )?)'
+      '(#qe["reply=( \*  )"])' '(#qe"[reply=( \*  )]")' '(#qe[reply=( \\\* )])'
+      '(#qe("reply=( \*  )"))' '(#qe"(reply=( \*  ))")' '(#qe(reply=( \\\* )))'
+      '(#qe*"reply=( \*  )"*)' '(#qe"*reply=( \*  )*")' '(#qe*reply=( \\\* )*)'
+      '(#qe*"reply=( \$s )"*)' '(#qe"*reply=( \$s )*")' '(#qe*reply=( \$s  )*)'
+    )
+    for 1 2 3 in $quals; do
+      print -r - \
+        ${ eval "echo [a]$1" 2>&1 } \
+        ${ eval "echo [a]$2" 2>&1 } \
+        ${ eval "echo [a]$3" 2>&1 }
+    done
+  )
+0:e glob qualifier delimiters, quoting, and expansion
+>* * *
+>* * *
+>* * *
+>* * *
+>* * *
+>* (eval):1: unknown file attribute: ) (eval):1: unknown file attribute: )
+>* (eval):1: unknown file attribute:   *
+>* * *
+
+# Careful: extendedglob off from this point.
 
   unsetopt extendedglob
   print -r -- ${(*)=${(@s.+.):-A+B}/(#b)(?)/-${(L)match[1]} ${match[1]}}

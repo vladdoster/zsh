@@ -68,6 +68,13 @@ Keymap isearch_keymap;
  */
 #define GETZLETEXT(ent)	((ent)->zle_text ? (ent)->zle_text : (ent)->node.nam)
 
+/*
+ * Flag that edits have been made to a zle line.
+ * If not set, nothing to forget.
+ */
+/**/
+int have_edits = 0;
+
 /**/
 void
 remember_edits(void)
@@ -81,6 +88,7 @@ remember_edits(void)
 	    if (ent->zle_text)
 		free(ent->zle_text);
 	    ent->zle_text = zlemetaline ? ztrdup(line) : line;
+	    have_edits = 1;
 	} else if (!zlemetaline)
 	    free(line);
     }
@@ -90,6 +98,10 @@ remember_edits(void)
 void
 forget_edits(void)
 {
+    if (!have_edits) {
+       return;
+    }
+    have_edits = 0;
     Histent he;
 
     for (he = hist_ring; he; he = up_histent(he)) {
@@ -1746,7 +1758,8 @@ acceptandinfernexthistory(char **args)
 {
     Histent he;
 
-    if (!(he = infernexthist(hist_ring, args)))
+    if (virangeflag || !(zlereadflags & ZLRF_HISTORY) ||
+	    !(he = infernexthist(hist_ring, args)))
 	return 1;
     zpushnode(bufstack, ztrdup(he->node.nam));
     done = 1;
@@ -1758,8 +1771,11 @@ acceptandinfernexthistory(char **args)
 int
 infernexthistory(char **args)
 {
-    Histent he = quietgethist(histline);
+    Histent he;
+    if (virangeflag || !(zlereadflags & ZLRF_HISTORY))
+	return 1;
 
+    he = quietgethist(histline);
     if (!he || !(he = infernexthist(he, args)))
 	return 1;
     zle_setline(he);
@@ -1772,12 +1788,14 @@ vifetchhistory(UNUSED(char **args))
 {
     if (zmult < 0)
 	return 1;
-    if (histline == curhist) {
+    if (histline == curhist || virangeflag || !(zlereadflags & ZLRF_HISTORY)) {
 	if (!(zmod.flags & MOD_MULT)) {
 	    zlecs = zlell;
 	    zlecs = findbol();
 	    return 0;
 	}
+	if (virangeflag || !(zlereadflags & ZLRF_HISTORY))
+	    return 1;
     }
     if (!zle_goto_hist((zmod.flags & MOD_MULT) ? zmult : curhist, 0, 0) &&
 	isset(HISTBEEP)) {
@@ -1921,6 +1939,9 @@ getvisrchstr(void)
 int
 vihistorysearchforward(char **args)
 {
+    if (virangeflag || !(zlereadflags & ZLRF_HISTORY))
+	return 1;
+
     if (*args) {
 	int ose = visrchsense, ret;
 	char *ost = visrchstr;
@@ -1942,6 +1963,9 @@ vihistorysearchforward(char **args)
 int
 vihistorysearchbackward(char **args)
 {
+    if (virangeflag || !(zlereadflags & ZLRF_HISTORY))
+	return 1;
+
     if (*args) {
 	int ose = visrchsense, ret;
 	char *ost = visrchstr;
@@ -1967,8 +1991,9 @@ virepeatsearch(UNUSED(char **args))
     int n = zmult;
     char *zt;
 
-    if (!visrchstr)
+    if (!visrchstr || virangeflag || !(zlereadflags & ZLRF_HISTORY))
 	return 1;
+
     if (zmult < 0) {
 	n = -n;
 	visrchsense = -visrchsense;

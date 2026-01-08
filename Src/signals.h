@@ -27,8 +27,6 @@
  *
  */
 
-#define SIGNAL_HANDTYPE void (*)_((int))
-
 #ifndef HAVE_KILLPG
 # define killpg(pgrp,sig) kill(-(pgrp),sig)
 #endif
@@ -36,26 +34,21 @@
 #define SIGZERR   (SIGCOUNT+1)
 #define SIGDEBUG  (SIGCOUNT+2)
 #define VSIGCOUNT (SIGCOUNT+3)
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+# define TRAPCOUNT (VSIGCOUNT + SIGRTMAX - SIGRTMIN + 1)
+# define SIGNUM(x) ((x) >= VSIGCOUNT ? (x) - VSIGCOUNT + SIGRTMIN : (x))
+# define SIGIDX(x) ((x) >= SIGRTMIN && (x) <= SIGRTMAX ? (x) - SIGRTMIN + VSIGCOUNT : (x))
+#else
+# define TRAPCOUNT VSIGCOUNT
+# define SIGNUM(x) (x)
+# define SIGIDX(x) (x)
+#endif
 #define SIGEXIT    0
 
 #ifdef SV_BSDSIG
 # define SV_INTERRUPT SV_BSDSIG
 #endif
 
-/* If not a POSIX machine, then we create our *
- * own POSIX style signal sets functions.     */
-#ifndef POSIX_SIGNALS
-# define sigemptyset(s)    (*(s) = 0)
-# if NSIG == 32
-#  define sigfillset(s)    (*(s) = ~(sigset_t)0, 0)
-# else
-#  define sigfillset(s)    (*(s) = (1 << NSIG) - 1, 0)
-# endif
-# define sigaddset(s,n)    (*(s) |=  (1 << ((n) - 1)), 0)
-# define sigdelset(s,n)    (*(s) &= ~(1 << ((n) - 1)), 0)
-# define sigismember(s,n)  ((*(s) & (1 << ((n) - 1))) != 0)
-#endif   /* ifndef POSIX_SIGNALS */
- 
 #define child_block()      signal_block(sigchld_mask)
 #define child_unblock()    signal_unblock(sigchld_mask)
 
@@ -133,10 +126,5 @@
 
 #define queue_signal_level() queueing_enabled
 
-#ifdef BSD_SIGNALS
-#define signal_block(S) sigblock(S)
-#else
-extern sigset_t signal_block _((sigset_t));
-#endif  /* BSD_SIGNALS   */
-
-extern sigset_t signal_unblock _((sigset_t));
+extern sigset_t signal_block (sigset_t);
+extern sigset_t signal_unblock (sigset_t);

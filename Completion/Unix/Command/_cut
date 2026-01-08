@@ -1,6 +1,7 @@
 #compdef cut gcut
 
 typeset -A _cut_args
+local -a args
 
 case $LANG in
   (de_DE.UTF-8)
@@ -31,7 +32,7 @@ case $LANG in
   ;;
 esac
 
-if _pick_variant gnu="Free Soft" unix --version; then
+if _pick_variant gnu='(Free Soft|uutils)' unix --version; then
   _arguments \
     '(--bytes -b)'{--bytes=,-b+}'['$_cut_args[bytes]']:list' \
     '(--characters -c)'{--characters=,-c+}'['$_cut_args[characters]']:list' \
@@ -45,7 +46,7 @@ if _pick_variant gnu="Free Soft" unix --version; then
     '*:file:_files'
 else
   case $OSTYPE in
-    freebsd*|dragonfly*) args+=( '(-d)-w[use whitespace as the delimiter]' ) ;;
+    freebsd*|dragonfly*|darwin*) args=( '(-d)-w[use whitespace as the delimiter]' ) ;;
   esac
   _arguments $args \
     "-b[${_cut_args[bytes]}]:list" \

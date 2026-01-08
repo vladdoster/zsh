@@ -576,7 +576,7 @@ parambeg(char *s)
 	    while (idigit(*e))
 		e++;
 	else
-	    e = itype_end(e, IIDENT, 0);
+	    e = itype_end(e, INAMESPC, 0);
 
 	/* Now make sure that the cursor is inside the name. */
 	if (offs <= e - s && offs >= b - s && n <= 0) {
@@ -765,7 +765,7 @@ docomplete(int lst)
 			    else if (idigit(*q))
 				do q++; while (idigit(*q));
 			    else
-				q = itype_end(q, IIDENT, 0);
+				q = itype_end(q, INAMESPC, 0);
 			    sav = *q;
 			    *q = '\0';
 			    if (zlemetacs - wb == q - s &&
@@ -1315,6 +1315,8 @@ get_comp_string(void)
 	    ins = (tok == REPEAT ? 2 : (tok != STRING && tok != TYPESET));
 	    zsfree(cmdstr);
 	    cmdstr = ztrdup(tokstr);
+	    untokenize(cmdstr);
+	    remnulargs(cmdstr);
 	    cmdtok = tok;
 	    /*
 	     * If everything before is a redirection, or anything
@@ -1497,7 +1499,8 @@ get_comp_string(void)
 	if (varq)
 	    tt = clwords[clwpos];
 
-	s = itype_end(tt, IIDENT, 0);
+	/* The only place we complete namespaces, see IIDENT below */
+	s = itype_end(tt, INAMESPC, 0);
 	sav = *s;
 	*s = '\0';
 	zsfree(varname);
@@ -1568,6 +1571,8 @@ get_comp_string(void)
 
 	i = 0;
 	MB_METACHARINIT();
+	/* All further uses of IIDENT in this file should change to   *
+         * INAMESPC if this case is changed.  Too ugly to risk now.   */
 	if (itype_end(s, IIDENT, 1) == s)
 	    nnb = s + MB_METACHARLEN(s);
 	else
@@ -1641,7 +1646,7 @@ get_comp_string(void)
 	} else {
 	    /* In mathematical expression, we complete parameter names  *
 	     * (even if they don't have a `$' in front of them).  So we *
-	     * have to find that name.                                  */
+	     * have to find that name.  See above regarding INAMESPC    */
 	    char *cspos = zlemetaline + zlemetacs, *wptr, *cptr;
 	    we = itype_end(cspos, IIDENT, 0) - zlemetaline;
 
@@ -2426,7 +2431,7 @@ mod_export int
 printfmt(char *fmt, int n, int dopr, int doesc)
 {
     char *p = fmt, nc[DIGBUFSIZE];
-    int l = 0, cc = 0, b = 0, s = 0, u = 0, m;
+    int l = 0, cc = 0;
 
     MB_METACHARINIT();
     for (; *p; ) {
@@ -2437,48 +2442,45 @@ printfmt(char *fmt, int n, int dopr, int doesc)
 	    if (idigit(*++p))
 		arg = zstrtol(p, &p, 10);
 	    if (*p) {
-		m = 0;
 		switch (*p) {
 		case '%':
-		    if (dopr)
+		    if (dopr) {
+			applytextattributes(0);
 			putc('%', shout);
+		    }
 		    cc++;
 		    break;
 		case 'n':
 		    sprintf(nc, "%d", n);
-		    if (dopr)
+		    if (dopr) {
+			applytextattributes(0);
 			fputs(nc, shout);
+		    }
 		    cc += MB_METASTRWIDTH(nc);
 		    break;
 		case 'B':
-		    b = 1;
 		    if (dopr)
-			tcout(TCBOLDFACEBEG);
+			tsetattrs(TXTBOLDFACE);
 		    break;
 		case 'b':
-		    b = 0; m = 1;
 		    if (dopr)
-			tcout(TCALLATTRSOFF);
+			tunsetattrs(TXTBOLDFACE);
 		    break;
 		case 'S':
-		    s = 1;
 		    if (dopr)
-			tcout(TCSTANDOUTBEG);
+			tsetattrs(TXTSTANDOUT);
 		    break;
 		case 's':
-		    s = 0; m = 1;
 		    if (dopr)
-			tcout(TCSTANDOUTEND);
+			tunsetattrs(TXTSTANDOUT);
 		    break;
 		case 'U':
-		    u = 1;
 		    if (dopr)
-			tcout(TCUNDERLINEBEG);
+			tsetattrs(TXTUNDERLINE);
 		    break;
 		case 'u':
-		    u = 0; m = 1;
 		    if (dopr)
-			tcout(TCUNDERLINEEND);
+			tunsetattrs(TXTUNDERLINE);
 		    break;
 		case 'F':
 		case 'K':
@@ -2491,18 +2493,28 @@ printfmt(char *fmt, int n, int dopr, int doesc)
 		    } else
 			atr = match_colour(NULL, is_fg, arg);
 		    if (atr != TXT_ERROR)
-			set_colour_attribute(atr, is_fg ? COL_SEQ_FG :
-					     COL_SEQ_BG, 0);
+			tsetattrs(atr);
 		    break;
 		case 'f':
-		    set_colour_attribute(TXTNOFGCOLOUR, COL_SEQ_FG, 0);
+		    tunsetattrs(TXTFGCOLOUR);
 		    break;
 		case 'k':
-		    set_colour_attribute(TXTNOBGCOLOUR, COL_SEQ_BG, 0);
+		    tunsetattrs(TXTBGCOLOUR);
+		    break;
+		case 'H':
+		    if (p[1] == '{') {
+			p = parsehighlight(p + 2, '}', &atr, NULL);
+			--p;
+			if (atr != TXT_ERROR)
+			    treplaceattrs(atr);
+		    } else
+			treplaceattrs(0);
 		    break;
 		case '{':
 		    if (arg)
 			cc += arg;
+		    if (dopr)
+			applytextattributes(0);
 		    for (p++; *p && (*p != '%' || p[1] != '}'); p++) {
 			if (*p == Meta) {
 			    p++;
@@ -2518,14 +2530,6 @@ printfmt(char *fmt, int n, int dopr, int doesc)
 			p--;
 		    break;
 		}
-		if (dopr && m) {
-		    if (b)
-			tcout(TCBOLDFACEBEG);
-		    if (s)
-			tcout(TCSTANDOUTBEG);
-		    if (u)
-			tcout(TCUNDERLINEBEG);
-		}
 	    } else
 		break;
 	    p++;
@@ -2533,6 +2537,7 @@ printfmt(char *fmt, int n, int dopr, int doesc)
 	    if (*p == '\n') {
 		cc++;
 		if (dopr) {
+		    applytextattributes(0);
 		    if (tccan(TCCLEAREOL))
 			tcout(TCCLEAREOL);
 		    else {
@@ -2551,6 +2556,7 @@ printfmt(char *fmt, int n, int dopr, int doesc)
 		convchar_t cchar;
 		int clen = MB_METACHARLENCONV(p, &cchar);
 		if (dopr) {
+		    applytextattributes(0);
 		    while (clen--) {
 			if (*p == Meta) {
 			    p++;
@@ -2568,6 +2574,8 @@ printfmt(char *fmt, int n, int dopr, int doesc)
 	}
     }
     if (dopr) {
+	treplaceattrs(0);
+	applytextattributes(0);
         if (!(cc % zterm_columns))
             fputs(" \010", shout);
 	if (tccan(TCCLEAREOL))

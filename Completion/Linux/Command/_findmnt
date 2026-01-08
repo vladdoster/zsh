@@ -8,6 +8,7 @@
 #
 local curcontext=$curcontext state state_descr line ret=1
 typeset -A opt_args
+local -a suf dedup
 
 _arguments -s -C \
   '(H -A --all)'{-A,--all}'[print all filesystems]' \
@@ -26,6 +27,7 @@ _arguments -s -C \
   '(H -o --output)--output-all[output all available columns]' \
   '(H -p --poll)'{-p+,--poll=}'[monitor changes in /proc/self/mountinfo]::action:(mount umount remount move)' \
   '(H --real)--pseudo[print only pseudo-filesystems]' \
+  '(H)--shadowed[print only filesystems over-mounted by another filesystem]' \
   '(H -R --submounts)'{-R,--submounts}'[print recursively all submounts]' \
   '(H --pseudo)--real[print only real filesystems]' \
   '(H -S --source :)'{-S+,--source=}'[specify the mount source]: :->sources' \
@@ -35,13 +37,16 @@ _arguments -s -C \
   '(H -U --uniq)'{-U,--uniq}'[ignore filesystems with duplicated mount targets]' \
   '(H -u --notruncate)'{-u,--notruncate}'[do not truncate text in columns]' \
   '(H -v --nofsroot)'{-v,--nofsroot}'[do not print \[/dir\] in the SOURCE column]' \
+  '(H -y --shell -n --noheadings)'{-y,--shell}'[use column names usable as shell variable identifiers]' \
   '(H -w --timeout)'{-w+,--timeout}'[specify timeout for --poll]:milliseconds: ' \
   '(H -x --verify)'{-x,--verify}'[check mount table content]' \
   '(H)--verbose[print more information]' \
+  '(H)--vfs-all[print all VFS options]' \
   '(H)1: :->sources_targets' \
   '(H)2:: :->targets' \
   + '(format)' \
   '(H)'{-D,--df}'[imitate the output of df command]' \
+  '(H)'{-I,--dfi}'[imitate the output of df with -i option]' \
   '(H)'{-J,--json}'[use JSON output format]' \
   '(H)'{-l,--list}'[use list output format]' \
   '(H)'{-P,--pairs}'[use key="value" output format]' \
@@ -52,6 +57,7 @@ _arguments -s -C \
   '(H)'{-N+,--task=}'[search /proc/<pid>/mountinfo]: :_pids' \
   '(H)'{-s,--fstab}'[search in /etc/fstab]' \
   + '(H)' \
+  '(* -)'{-H,--list-columns}'[list available columns]' \
   '(- :)'{-h,--help}'[display help text and exit]' \
   '(- :)'{-V,--version}'[display version and exit]' \
     && ret=0
@@ -63,13 +69,16 @@ __findmnt_mountpoints () {
 
 case $state in
   columns)
+    dedup=( ${(Ms.,.)${PREFIX#+}##*,} ${(Ms.,.)SUFFIX%%,*} )
+    suf=( -qS , )
+    compset -S ',*' && suf=()
     compset -P '+' || _describe -t list-prefixes prefix \
-		      '( +:"not replace but extend the list" )' -S '' && ret=0
+        '( +:"not replace but extend the list" )' -S '' && ret=0
+    compset -P '*,'
     local -a columns=(
-      ${${${(f)"$(_call_program columns findmnt -h)"}[(r)Available*,-2]}[2,-1]}
+      ${${${${(f)"$(_call_program columns findmnt --list-columns)"}## #}//:/\\:}/ <[^>]#> #/:}
     )
-    columns=( ${${${${${${columns## #}//:/\\:}//\[/\\[}//]/\\]}/  /[}/%/]} )
-    _values -s , -M 'm:{a-z}={A-Z}' column $columns && ret=0
+    _describe -t fields column columns -M 'm:{a-z}={A-Z}' $suf -F dedup && ret=0
     ;;
   *) # call "findmnt $opts" to get possible sources/targets
     local opts='-lnve'

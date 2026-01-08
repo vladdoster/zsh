@@ -1161,8 +1161,8 @@ comp_match(char *pfx, char *sfx, char *w, Patprog cp, Cline *clp, int qu,
 
 	/* We still break it into parts here, trying to build a sensible
 	 * cline list for these matches, too. */
-	w = dupstring(w);
 	wl = strlen(w);
+	w = dupstring_wlen(w, wl);
 	*clp = bld_parts(w, wl, wl, NULL, NULL);
 	*exact = 0;
     } else {
@@ -2045,12 +2045,12 @@ join_strs(int la, char *sa, int lb, char *sb)
 				zlelineasstring(line, mp->llen, 0, &convlen,
 						NULL, 0);
 			    if (rr <= convlen) {
-				char *or = rs;
+				ptrdiff_t diff = rp - rs;
 				int alloclen = (convlen > 20) ? convlen : 20;
 
 				rs = realloc(rs, (rl += alloclen));
 				rr += alloclen;
-				rp += rs - or;
+				rp = rs + diff;
 			    }
 			    memcpy(rp, convstr, convlen);
 			    rp += convlen;
@@ -2073,11 +2073,11 @@ join_strs(int la, char *sa, int lb, char *sb)
 	} else {
 	    /* Same character, just take it. */
 	    if (rr <= 1 /* HERE charlen */) {
-		char *or = rs;
+		ptrdiff_t diff = rp - rs;
 
 		rs = realloc(rs, (rl += 20));
 		rr += 20;
-		rp += rs - or;
+		rp = rs + diff;
 	    }
 	    /* HERE: multibyte char */
 	    *rp++ = *sa;
@@ -2127,7 +2127,7 @@ cmp_anchors(Cline o, Cline n, int join)
 	(j = join_strs(o->wlen, o->word, n->wlen, n->word))) {
 	o->flags |= CLF_JOIN;
 	o->wlen = strlen(j);
-	o->word = dupstring(j);
+	o->word = dupstring_wlen(j, o->wlen);
 
 	return 2;
     }
@@ -2487,10 +2487,12 @@ join_psfx(Cline ot, Cline nt, Cline *orest, Cline *nrest, int sfx)
 
 	/* We first get the length of the prefix equal in both strings. */
 	if (o->flags & CLF_LINE) {
-	    if ((len = sub_match(&md, o->line, o->llen, sfx)) != o->llen) {
+	    if ((len = sub_match(&md, o->line, o->llen, sfx)) != o->llen
+		    && len >= 0) {
 		join = 1; line = 1; slen = &(o->llen); sstr = &(o->line);
 	    }
-	} else if ((len = sub_match(&md, o->word, o->wlen, sfx)) != o->wlen) {
+	} else if ((len = sub_match(&md, o->word, o->wlen, sfx)) != o->wlen
+		&& len >= 0) {
 	    if (o->line) {
 		memcpy(&md, &omd, sizeof(struct cmdata));
 		o->flags |= CLF_LINE | CLF_DIFF;

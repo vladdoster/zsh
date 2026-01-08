@@ -217,32 +217,29 @@ shinbufrestore(void)
 static int
 shingetchar(void)
 {
-    int nread, rsize = isset(SHINSTDIN) ? 1 : SHINBUFSIZE;
+    int nread;
 
     if (shinbufptr < shinbufendptr)
-	return STOUC(*shinbufptr++);
+	return (unsigned char) *shinbufptr++;
 
     shinbufreset();
 #ifdef USE_LSEEK
-    if (rsize == 1 && lseek(SHIN, 0, SEEK_CUR) != (off_t)-1)
-	rsize = SHINBUFSIZE;
-    if (rsize > 1) {
+    if (!isset(SHINSTDIN) || lseek(SHIN, 0, SEEK_CUR) != (off_t) -1) {
 	do {
 	    errno = 0;
-	    nread = read(SHIN, shinbuffer, rsize);
+	    nread = read(SHIN, shinbuffer, SHINBUFSIZE);
 	} while (nread < 0 && errno == EINTR);
 	if (nread <= 0)
 	    return -1;
 	if (isset(SHINSTDIN) &&
 	    (shinbufendptr = memchr(shinbuffer, '\n', nread))) {
-	    shinbufendptr++;
-	    rsize = (shinbufendptr - shinbuffer);
+	    int rsize = (++shinbufendptr - shinbuffer);
 	    if (nread > rsize &&
 		lseek(SHIN, -(nread - rsize), SEEK_CUR) < 0)
 		zerr("lseek(%d, %d): %e", SHIN, -(nread - rsize), errno);
 	} else
 	    shinbufendptr = shinbuffer + nread;
-	return STOUC(*shinbufptr++);
+	return (unsigned char) *shinbufptr++;
     }
 #endif
     for (;;) {
@@ -259,7 +256,7 @@ shingetchar(void)
     }
     if (shinbufendptr == shinbuffer)
         return -1;
-    return STOUC(*shinbufptr++);
+    return (unsigned char) *shinbufptr++;
 }
 
 /* Read a line from SHIN.  Convert tokens and   *
@@ -328,7 +325,7 @@ ingetc(void)
 	if (inbufleft) {
 	    inbufleft--;
 	    inbufct--;
-	    if (itok(lastc = STOUC(*inbufptr++)))
+	    if (itok(lastc = (unsigned char) *inbufptr++))
 		continue;
 	    if (((inbufflags & INP_LINENO) || !strin) && lastc == '\n')
 		lineno++;
@@ -402,7 +399,7 @@ inputline(void)
 	    char *pptbuf;
 	    int pptlen;
 	    pptbuf = unmetafy(promptexpand(ingetcpmptl ? *ingetcpmptl : NULL,
-					   0, NULL, NULL, NULL), &pptlen);
+		    0, NULL, NULL, NULL), &pptlen);
 	    write_loop(2, pptbuf, pptlen);
 	    free(pptbuf);
 	}
@@ -610,11 +607,11 @@ inungetc(int c)
     }
 }
 
-/* stuff a whole file into the input queue and print it */
+/* stuff a whole file into memory and return it */
 
 /**/
-int
-stuff(char *fn)
+mod_export off_t
+zstuff(char **out, const char *fn)
 {
     FILE *in;
     char *buf;
@@ -622,20 +619,39 @@ stuff(char *fn)
 
     if (!(in = fopen(unmeta(fn), "r"))) {
 	zerr("can't open %s", fn);
-	return 1;
+	return -1;
     }
+    queue_signals();
     fseek(in, 0, SEEK_END);
     len = ftell(in);
     fseek(in, 0, SEEK_SET);
     buf = (char *)zalloc(len + 1);
-    if (!(fread(buf, len, 1, in))) {
+    if (len && !(fread(buf, len, 1, in))) {
 	zerr("read error on %s", fn);
 	fclose(in);
 	zfree(buf, len + 1);
-	return 1;
+	unqueue_signals();
+	return -1;
     }
     fclose(in);
     buf[len] = '\0';
+    *out = buf;
+    unqueue_signals();
+    return len;
+}
+
+/* stuff a whole file into the input queue and print it */
+
+/**/
+int
+stuff(char *fn)
+{
+    char *buf;
+    off_t len = zstuff(&buf, fn);
+
+    if (len < 0)
+	return 1;
+    
     fwrite(buf, len, 1, stderr);
     fflush(stderr);
     inputsetline(metafy(buf, len, META_REALLOC), INP_FREE);
@@ -816,6 +832,7 @@ char *input_hasalias(void)
 {
     int flags = inbufflags;
     struct instacks *instackptr = instacktop;
+    char *alias_nam = NULL;
 
     for (;;)
     {
@@ -824,9 +841,9 @@ char *input_hasalias(void)
 	DPUTS(instackptr == instack, "BUG: continuation at bottom of instack");
 	instackptr--;
 	if (instackptr->alias)
-	    return instackptr->alias->node.nam;
+	    alias_nam = instackptr->alias->node.nam;
 	flags = instackptr->flags;
     }
 
-    return NULL;
+    return alias_nam;
 }

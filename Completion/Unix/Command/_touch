@@ -1,7 +1,7 @@
 #compdef touch gtouch
 
 local args variant
-_pick_variant -r variant gnu=GNU $OSTYPE --version
+_pick_variant -r variant gnu='(GNU|uutils)' $OSTYPE --version
 
 args=(
   '-a[change access time (atime)]'
@@ -28,7 +28,7 @@ case $variant in
   darwin*|dragonfly*|freebsd*|netbsd*)
     args+=( '-h[act on symbolic links themselves]' )
   ;|
-  dragonfly*|freebsd*|openbsd*|solaris*)
+  darwin*|dragonfly*|freebsd*|openbsd*|solaris*)
     args+=( '(-r -t 1)-d+[use specified date/time]:date/time' )
   ;|
   darwin*|dragonfly*|freebsd*|netbsd*|solaris*)

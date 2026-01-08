@@ -3,7 +3,7 @@
 local curcontext="$curcontext" state line expl ret=1 variant
 local suf usr grp req deref pattern arg args aopts=( -A '-*' )
 
-_pick_variant -r variant -b zsh gnu=Free\ Soft $OSTYPE --version
+_pick_variant -r variant -b zsh gnu='(Free Soft|uutils)' $OSTYPE --version
 case "$variant" in
   gnu)
     aopts=()
@@ -13,6 +13,7 @@ case "$variant" in
       '(-h --no-dereference)--dereference[dereference symlinks]'
       '(-h --no-dereference --dereference)'{-h,--no-dereference}'[operate on symlinks themselves]'
       '(-f --silent --quiet)'{-f,--silent,--quiet}"[don't report errors]"
+      '--from=[restrict changes to files by current ownership]: :->owner'
       '--preserve-root[fail to operate recursively on /]'
       '--reference=[copy ownership of specified file]:file:_files'
       '(-R --recursive)'{-R,--recursive}'[change files and directories recursively]'
@@ -22,8 +23,6 @@ case "$variant" in
       '(- : *)--help[display help information]'
       '(- : *)--version[display version information]'
     )
-    [[ $service = chown ]] &&
-        args+=( '--from=[restrict changes to files by current ownership]: :->owner' )
     ;;
   *)
     args=(
@@ -43,7 +42,7 @@ case "$variant" in
       '(-H -L -P)-P[do not follow symlinks (default)]'
     )
     ;|
-  dragonfly*|freebsd*)
+  dragonfly*|freebsd*|darwin*)
     args+=(
       "-x[don't traverse file systems]"
     )
@@ -63,10 +62,15 @@ case "$variant" in
       '-s[owner and/or group are Windows SID strings]'
     )
     ;;
+  darwin*)
+    args+=(
+      '-n[interpret user and group as numeric, avoiding name lookups]'
+    )
+    ;;
 esac
 
 (( $+words[(r)--reference*] )) || args+=( '(--reference)1: :->owner' )
-_arguments -C -s -S $aopts "$args[@]" '*: :->files' && ret=0
+_arguments -C -s -S -0 $aopts "$args[@]" '*: :->files' && ret=0
 
 case $state in
   owner)
@@ -90,8 +94,8 @@ case $state in
     (( $+opt_args[-h] || $+opt_args[--no-dereference] )) || deref="-"
     if (( $+opt_args[--reference] )); then
       zmodload -F zsh/stat b:zstat 2>/dev/null
-      usr=$(zstat +uid $opt_args[--reference])
-      grp=$(zstat +gid $opt_args[--reference])
+      usr=$(zstat +uid $opt_args[--reference]:Q)
+      grp=$(zstat +gid $opt_args[--reference]:Q)
       _wanted files expl file _files -g "*($deref^u$usr,$deref^g$grp)" && ret=0
       return ret
     fi

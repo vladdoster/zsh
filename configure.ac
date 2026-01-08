@@ -71,7 +71,7 @@ ifdef([zsh-mem],[undefine([zsh-mem])])dnl
 AH_TEMPLATE([ZSH_MEM],
 [Define to 1 if you want to use zsh's own memory allocation routines])
 AC_ARG_ENABLE(zsh-mem,
-AS_HELP_STRING([--enable-zsh-mem],[compile with zsh memory allocation routines]),
+AS_HELP_STRING([--enable-zsh-mem],[compile with zsh memory allocation routines - deprecated]),
 [if test x$enableval = xyes; then
   AC_DEFINE(ZSH_MEM)
 fi])
@@ -273,11 +273,6 @@ fi],
 AC_DEFINE(CONFIG_LOCALE)
 )
 
-dnl Do you want to compile as K&R C.
-AC_ARG_ENABLE(ansi2knr,
-AS_HELP_STRING([--enable-ansi2knr],[translate source to K&R C before compiling]),
-[ansi2knr="$enableval"], [ansi2knr=default])
-
 ifdef([runhelpdir],[undefine([runhelpdir])])dnl
 AC_ARG_ENABLE(runhelpdir,
 AS_HELP_STRING([--enable-runhelpdir=DIR],[the directory in which to install run-help files]),
@@ -438,7 +433,18 @@ fi],
 
 dnl Do you want to look for pcre support?
 AC_ARG_ENABLE(pcre,
-AS_HELP_STRING([--enable-pcre],[enable the search for the pcre library (may create run-time library dependencies)]))
+AS_HELP_STRING([--enable-pcre],[enable the search for the pcre2 library (may create run-time library dependencies)]))
+
+AC_ARG_VAR(PCRE_CONFIG, [pathname of pcre2-config if it is not in PATH])
+if test "x$enable_pcre" = xyes; then
+  AC_CHECK_PROG([PCRE_CONFIG], pcre2-config, pcre2-config)
+  if test "x$PCRE_CONFIG" = x; then
+    enable_pcre=no
+    AC_MSG_WARN([pcre2-config not found: pcre module is disabled.])
+    AC_MSG_NOTICE(
+      [Set PCRE_CONFIG to pathname of pcre2-config if it is not in PATH.])
+  fi
+fi
 
 dnl Do you want to look for capability support?
 AC_ARG_ENABLE(cap,
@@ -472,7 +478,7 @@ fi
 dnl if the user hasn't specified CFLAGS, then
 dnl   if compiler is gcc, then use -O2 and some warning flags
 dnl   else use -O
-if test -n "$auto_cflags" && test ."$ansi2knr" != .yes; then
+if test -n "$auto_cflags"; then
   if test "${enable_zsh_debug}" = yes; then
     if test -n "$GCC"; then
       CFLAGS="$CFLAGS -Wall -Wmissing-prototypes -ggdb"
@@ -546,30 +552,6 @@ case "$host_os" in
   darwin[[0-9]].*) CPP="$CPP -traditional-cpp" ;;
 esac
 
-fp_PROG_CC_STDC
-AC_MSG_CHECKING([whether to use prototypes])
-if test ."$ansi2knr" = .yes || test ."$ansi2knr" = .no; then
-  msg="(overridden) "
-else
-  msg=
-  if test ."$fp_cv_prog_cc_stdc" = .no; then
-    ansi2knr=yes
-  else
-    ansi2knr=no
-  fi
-fi
-AH_TEMPLATE([PROTOTYPES],
-[Define to 1 if ANSI function prototypes are usable.])
-if test "$ansi2knr" = yes; then
-  AC_MSG_RESULT(${msg}no)
-  U=_
-else
-  AC_MSG_RESULT(${msg}yes)
-  AC_DEFINE(PROTOTYPES)
-  U=
-fi
-AC_SUBST(U)
-
 AC_FUNC_ALLOCA              dnl Check how to get `alloca'.
 
 dnl If the compiler supports union initialisation
@@ -580,16 +562,6 @@ AH_TEMPLATE([HAVE_UNION_INIT],
 [Define to 1 if the compiler can initialise a union.])
 if test x$zsh_cv_c_have_union_init = xyes; then
   AC_DEFINE(HAVE_UNION_INIT)
-fi
-
-dnl  Checking if compiler correctly cast signed to unsigned.
-AC_CACHE_CHECK(if signed to unsigned casting is broken,
-zsh_cv_c_broken_signed_to_unsigned_casting,
-[AC_RUN_IFELSE([AC_LANG_SOURCE([[main(){return((int)(unsigned char)((char) -1) == 255);}]])],[zsh_cv_c_broken_signed_to_unsigned_casting=yes],[zsh_cv_c_broken_signed_to_unsigned_casting=no],[zsh_cv_c_broken_signed_to_unsigned_casting=no])])
-AH_TEMPLATE([BROKEN_SIGNED_TO_UNSIGNED_CASTING],
-[Define to 1 if compiler incorrectly cast signed to unsigned.])
-if test x$zsh_cv_c_broken_signed_to_unsigned_casting = xyes; then
-  AC_DEFINE(BROKEN_SIGNED_TO_UNSIGNED_CASTING)
 fi
 
 dnl Checking if the compiler supports variable-length arrays
@@ -633,25 +605,18 @@ fi
 
 if test x"$TEXI2HTML" = xtexi2any; then
   TEXI2HTML='texi2any -c TEXI2HTML=1'
+  case `texi2any --version 2>/dev/null | sed -e 's/^.*) *//' -e 1q` in
+    [[1-6]].*) SET_TEXI2ANY_VAR=set_from_init_file ;;
+    *) SET_TEXI2ANY_VAR=texinfo_set_from_init_file ;;
+  esac
 fi
+AC_SUBST(SET_TEXI2ANY_VAR)
 
 case "$LC_PAPER" in
   ??_US*) PAPERSIZE=us ;;
   *)      PAPERSIZE=a4 ;;
 esac
 AC_SUBST(PAPERSIZE)
-
-AC_CHECK_PROGS([ANSI2KNR], [ansi2knr], [: ansi2knr])
-
-if test x"$ansi2knr" = xyes && test x"$ANSI2KNR" = x": ansi2knr"; then
-    echo "----------"
-    echo "configure fatal error:"
-    echo "ansi2knr was specified (--enable-ansi2knr) but the program could not be found."
-    echo "Either remove the configure option if it is not required or build the ansi2knr"
-    echo "program before reconfiguring Zsh.  The source code for ansi2knr is also"
-    echo "available in the GPL directory on Zsh distribution sites."
-    exit 1
-fi
 
 dnl ------------------
 dnl CHECK HEADER FILES
@@ -660,25 +625,22 @@ AC_HEADER_DIRENT
 AC_HEADER_STAT
 AC_HEADER_SYS_WAIT
 
-oldcflags="$CFLAGS"
-if test x$enable_pcre = xyes; then
-AC_CHECK_PROG([PCRECONF], pcre-config, pcre-config)
-dnl Typically (meaning on this single RedHat 9 box in front of me)
-dnl pcre-config --cflags produces a -I output which needs to go into
+dnl pcre2-config --cflags may produce a -I output which needs to go into
 dnl CPPFLAGS else configure's preprocessor tests don't pick it up,
 dnl producing a warning.
-if test "x$ac_cv_prog_PCRECONF" = xpcre-config; then
-  CPPFLAGS="$CPPFLAGS `pcre-config --cflags`"
-fi
+if test "x$enable_pcre" = xyes; then
+  CPPFLAGS="`$PCRE_CONFIG --cflags` $CPPFLAGS"
+  AC_CHECK_HEADERS([pcre2.h],,,[#define PCRE2_CODE_UNIT_WIDTH 8])
 fi
 
 AC_CHECK_HEADERS(sys/time.h sys/times.h sys/select.h termcap.h termio.h \
-		 termios.h sys/param.h sys/filio.h string.h memory.h \
+		 termios.h sys/param.h sys/filio.h \
 		 limits.h fcntl.h libc.h sys/utsname.h sys/resource.h \
+		 sys/sysctl.h sys/random.h \
 		 locale.h errno.h stdio.h stdarg.h varargs.h stdlib.h \
 		 unistd.h sys/capability.h \
 		 utmp.h utmpx.h sys/types.h pwd.h grp.h poll.h sys/mman.h \
-		 netinet/in_systm.h pcre.h langinfo.h wchar.h stddef.h \
+		 netinet/in_systm.h langinfo.h wchar.h stddef.h \
 		 sys/stropts.h iconv.h ncurses.h ncursesw/ncurses.h \
 		 ncurses/ncurses.h)
 if test x$dynamic = xyes; then
@@ -887,11 +849,6 @@ esac])
 
 AC_SEARCH_LIBS(getpwnam, nsl)
 
-dnl I am told that told that unicos reqire these for nis_list
-if test `echo $host_os | sed 's/^\(unicos\).*/\1/'` = unicos; then
-  LIBS="-lcraylm -lkrb -lnisdb -lnsl -lrpcsvc $LIBS"
-fi
-
 if test "x$dynamic" = xyes; then
   AC_CHECK_LIB(dl, dlopen)
 fi
@@ -901,7 +858,7 @@ if test x$enable_cap = xyes; then
 fi
 
 AC_CHECK_LIB(socket, socket)
-AC_SEARCH_LIBS(gethostbyname2, bind)
+AC_SEARCH_LIBS(gethostbyname2, bind network)
 
 case $LIBS in
   *-lbind*)
@@ -955,12 +912,6 @@ if test "x$ac_found_iconv" = "xyes"; then
       [ac_cv_iconv_const=const])])
   AC_DEFINE_UNQUOTED([ICONV_CONST], $ac_cv_iconv_const,
     [Define as const if the declaration of iconv() needs const.])
-fi
-
-if test x$enable_pcre = xyes; then
-dnl pcre-config should probably be employed here
-dnl AC_SEARCH_LIBS(pcre_compile, pcre)
-  LIBS="`$ac_cv_prog_PCRECONF --libs` $LIBS"
 fi
 
 dnl ---------------------
@@ -1046,7 +997,7 @@ else
   [AC_RUN_IFELSE([AC_LANG_SOURCE([[
 #include <sys/types.h>
 
-main() { return sizeof(off_t) < 8; }
+int main() { return sizeof(off_t) < 8; }
 ]])],[zsh_cv_off_t_is_64_bit=yes],[zsh_cv_off_t_is_64_bit=no],[zsh_cv_off_t_is_64_bit=no])])
   if test x$zsh_cv_off_t_is_64_bit = xyes; then
     AC_DEFINE(OFF_T_IS_64_BIT)
@@ -1056,7 +1007,7 @@ main() { return sizeof(off_t) < 8; }
   [AC_RUN_IFELSE([AC_LANG_SOURCE([[
 #include <sys/types.h>
 
-main() { return sizeof(ino_t) < 8; }
+int main() { return sizeof(ino_t) < 8; }
 ]])],[zsh_cv_ino_t_is_64_bit=yes],[zsh_cv_ino_t_is_64_bit=no],[zsh_cv_ino_t_is_64_bit=no])])
   if test x$zsh_cv_ino_t_is_64_bit = xyes; then
     AC_DEFINE(INO_T_IS_64_BIT)
@@ -1302,14 +1253,15 @@ AC_CHECK_FUNCS(strftime strptime mktime timelocal \
 	       fseeko ftello \
 	       mkfifo _mktemp mkstemp \
 	       waitpid wait3 \
-	       sigaction sigblock sighold sigrelse sigsetmask sigprocmask \
+	       sigqueue \
 	       killpg setpgid setpgrp tcsetpgrp tcgetattr nice \
 	       gethostname gethostbyname2 getipnodebyname \
 	       inet_aton inet_pton inet_ntop \
 	       getlogin getpwent getpwnam getpwuid getgrgid getgrnam \
-	       initgroups nis_list \
+	       initgroups \
 	       setuid seteuid setreuid setresuid setsid \
 	       setgid setegid setregid setresgid \
+	       memccpy \
 	       memcpy memmove strstr strerror strtoul \
 	       getrlimit getrusage \
 	       setlocale \
@@ -1318,12 +1270,11 @@ AC_CHECK_FUNCS(strftime strptime mktime timelocal \
 	       signgam tgamma \
 	       log2 \
 	       scalbn \
-	       putenv getenv setenv unsetenv xw\
+	       putenv getenv setenv unsetenv \
 	       brk sbrk \
 	       pathconf sysconf \
 	       tgetent tigetflag tigetnum tigetstr setupterm initscr resize_term \
 	       getcchar setcchar waddwstr wget_wch win_wch use_default_colors \
-	       pcre_compile pcre_study pcre_exec \
 	       nl_langinfo \
 	       erand48 open_memstream \
 	       posix_openpt \
@@ -1337,8 +1288,12 @@ AC_CHECK_FUNCS(strftime strptime mktime timelocal \
 	       cygwin_conv_path \
 	       nanosleep \
 	       srand_deterministic \
+	       getrandom arc4random_buf \
 	       setutxent getutxent endutxent getutent)
 AC_FUNC_STRCOLL
+
+# fpurge exists on musl, but is undeclared in stdio.h and isn't actually required
+AC_CHECK_DECLS([fpurge])
 
 # isinf() and isnan() can exist as either functions or macros.
 AH_TEMPLATE([HAVE_ISINF],
@@ -1369,13 +1324,18 @@ zsh_cv_func_realpath_accepts_null,
 #include <stdlib.h>
 #include <limits.h>
 ],[
-exit(!realpath("/", (char*)0));
+return(!realpath("/", (char*)0));
 ])],
 [zsh_cv_func_realpath_accepts_null=yes],
 [zsh_cv_func_realpath_accepts_null=no],
 [zsh_cv_func_realpath_accepts_null=$ac_cv_func_canonicalize_file_name])])
 if test x$zsh_cv_func_realpath_accepts_null = xyes; then
   AC_DEFINE(REALPATH_ACCEPTS_NULL)
+fi
+
+if test x$enable_pcre = xyes; then
+  LIBS="`$PCRE_CONFIG --libs8` $LIBS"
+  AC_CHECK_FUNCS(pcre2_compile_8)
 fi
 
 if test x$enable_cap = xyes; then
@@ -1386,17 +1346,16 @@ dnl  Check if tgetent accepts NULL (and will allocate its own termcap buffer)
 dnl  Some termcaps reportedly accept a zero buffer, but then dump core
 dnl  in tgetstr().
 dnl  Under Cygwin test program crashes but exit code is still 0. So,
-dnl  we test for a file that porgram should create
+dnl  we test for a file that program should create
 AH_TEMPLATE([TGETENT_ACCEPTS_NULL],
 [Define to 1 if tgetent() accepts NULL as a buffer.])
 AC_CACHE_CHECK(if tgetent accepts NULL,
 zsh_cv_func_tgetent_accepts_null,
 [AC_RUN_IFELSE([AC_LANG_SOURCE([[
 #include <fcntl.h>
-#include <stdlib.h>
 int tgetent(char *, char *);
 char *tgetstr(char *, char **);
-main()
+int main()
 {
     char buf[4096];
     int r1 = tgetent(buf, "vt100");
@@ -1407,7 +1366,7 @@ main()
     	tgetstr("cl", &u);
 	creat("conftest.tgetent", 0640);
     }
-    exit((r1 != r2) || r2 == -1);
+    return((r1 != r2) || r2 == -1);
 }
 ]])],[if test -f conftest.tgetent; then
     zsh_cv_func_tgetent_accepts_null=yes
@@ -1421,10 +1380,9 @@ AC_CACHE_CHECK(if tgetent returns 0 on success,
 zsh_cv_func_tgetent_zero_success,
 [AC_RUN_IFELSE([AC_LANG_SOURCE([[
 #include <fcntl.h>
-#include <stdlib.h>
 int tgetent(char *, char*);
 char *tgetstr(char *, char **);
-main()
+int main()
 {
     char buf[4096];
     int r1 = tgetent(buf, "!@#$%^&*");
@@ -1435,7 +1393,7 @@ main()
     	tgetstr("cl", &u);
 	creat("conftest.tgetent0", 0640);
     }
-    exit(r1 == r2);
+    return(r1 == r2);
 }
 ]])],[if test -f conftest.tgetent0; then
     zsh_cv_func_tgetent_zero_success=yes
@@ -1515,34 +1473,13 @@ else
 zsh_cv_use_xattr=no
 fi])
 
-dnl -------------
-dnl CHECK SIGNALS
-dnl -------------
-dnl What style of signal do you have (POSIX, BSD, or SYSV)?
-AH_TEMPLATE([POSIX_SIGNALS],
-[Define to 1 if you use POSIX style signal handling.])
-AH_TEMPLATE([BSD_SIGNALS],
-[Define to 1 if you use BSD style signal handling (and can block signals).])
-AH_TEMPLATE([SYSV_SIGNALS],
-[Define to 1 if you use SYS style signal handling (and can block signals).])
-AH_TEMPLATE([NO_SIGNAL_BLOCKING],
-[Define to 1 if you have no signal blocking at all (bummer).])
-AC_MSG_CHECKING(what style of signals to use)
-if test x$ac_cv_func_sigaction = xyes && test x$ac_cv_func_sigprocmask = xyes; then
-  signals_style=POSIX_SIGNALS
-  AC_DEFINE(POSIX_SIGNALS)
-elif test x$ac_cv_func_sigblock = xyes && test x$ac_cv_func_sigsetmask = xyes; then
-  signals_style=BSD_SIGNALS
-  AC_DEFINE(BSD_SIGNALS)
-elif test x$ac_cv_func_sighold = xyes && test x$ac_cv_func_sigrelse = xyes; then
-  signals_style=SYSV_SIGNALS
-  AC_DEFINE(SYSV_SIGNALS)
-else
-  signals_style=NO_SIGNAL_BLOCKING
-  AC_DEFINE(NO_SIGNAL_BLOCKING)
-fi
-AC_DEFINE_UNQUOTED($signals_style)
-AC_MSG_RESULT($signals_style)
+dnl We don't want to use setenv(3) on El Capitan or older OS X because it
+dnl removes a leading '=' from the value of the environment variable
+AH_TEMPLATE([SETENV_MANGLES_EQUAL],
+[Define to 1 if setenv removes a leading =])
+case $host_os in
+  darwin1[0-5]*) AC_DEFINE(SETENV_MANGLES_EQUAL) ;;
+esac
 
 dnl Where is <signal.h> located?  Needed as input for signals.awk
 AC_CACHE_CHECK(where signal.h is located, zsh_cv_path_signal_h,
@@ -1562,7 +1499,7 @@ $AWK '{ if ($1 ~ /sig/) files[[$1]] = $1 }
   END { for (var in files) print var }'`"
 rm -f nametmp.c
 if test -z "$sigfile_list"; then
-  dnl In case we don't get the stuff from the preprocesor, use the old
+  dnl In case we don't get the stuff from the preprocessor, use the old
   dnl list of standard places.
   sigfile_list="/usr/include/sys/iso/signal_iso.h
 /usr/include/bsd/sys/signal.h
@@ -1761,27 +1698,27 @@ if test x$zsh_cv_path_term_header != xnone; then
   fi
 
   AC_MSG_CHECKING(if boolcodes is available)
-  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = boolcodes; puts(*test);]])],[AC_DEFINE(HAVE_BOOLCODES) boolcodes=yes],[boolcodes=no])
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = (char **)boolcodes; puts(*test);]])],[AC_DEFINE(HAVE_BOOLCODES) boolcodes=yes],[boolcodes=no])
   AC_MSG_RESULT($boolcodes)
 
   AC_MSG_CHECKING(if numcodes is available)
-  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = numcodes; puts(*test);]])],[AC_DEFINE(HAVE_NUMCODES) numcodes=yes],[numcodes=no])
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = (char **)numcodes; puts(*test);]])],[AC_DEFINE(HAVE_NUMCODES) numcodes=yes],[numcodes=no])
   AC_MSG_RESULT($numcodes)
 
   AC_MSG_CHECKING(if strcodes is available)
-  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = strcodes; puts(*test);]])],[AC_DEFINE(HAVE_STRCODES) strcodes=yes],[strcodes=no])
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = (char **)strcodes; puts(*test);]])],[AC_DEFINE(HAVE_STRCODES) strcodes=yes],[strcodes=no])
   AC_MSG_RESULT($strcodes)
 
   AC_MSG_CHECKING(if boolnames is available)
-  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = boolnames; puts(*test);]])],[AC_DEFINE(HAVE_BOOLNAMES) boolnames=yes],[boolnames=no])
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = (char **)boolnames; puts(*test);]])],[AC_DEFINE(HAVE_BOOLNAMES) boolnames=yes],[boolnames=no])
   AC_MSG_RESULT($boolnames)
 
   AC_MSG_CHECKING(if numnames is available)
-  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = numnames; puts(*test);]])],[AC_DEFINE(HAVE_NUMNAMES) numnames=yes],[numnames=no])
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = (char **)numnames; puts(*test);]])],[AC_DEFINE(HAVE_NUMNAMES) numnames=yes],[numnames=no])
   AC_MSG_RESULT($numnames)
 
   AC_MSG_CHECKING(if strnames is available)
-  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = strnames; puts(*test);]])],[AC_DEFINE(HAVE_STRNAMES) strnames=yes],[strnames=no])
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([[$term_includes]], [[char **test = (char **)strnames; puts(*test);]])],[AC_DEFINE(HAVE_STRNAMES) strnames=yes],[strnames=no])
   AC_MSG_RESULT($strnames)
 
   dnl There are apparently defective terminal library headers on some
@@ -1861,8 +1798,7 @@ zsh_cv_rlim_t_is_longer,
 #include <sys/time.h>
 #endif
 #include <sys/resource.h>
-#include <stdlib.h>
-main(){struct rlimit r;exit(sizeof(r.rlim_cur) <= sizeof(long));}]])],[zsh_cv_rlim_t_is_longer=yes],[zsh_cv_rlim_t_is_longer=no],[zsh_cv_rlim_t_is_longer=yes])])
+int main(){struct rlimit r;return(sizeof(r.rlim_cur) <= sizeof(long));}]])],[zsh_cv_rlim_t_is_longer=yes],[zsh_cv_rlim_t_is_longer=no],[zsh_cv_rlim_t_is_longer=yes])])
 if test x$zsh_cv_rlim_t_is_longer = xyes; then
   AC_CACHE_CHECK(if rlim_t is a quad,
   zsh_cv_rlim_t_is_quad_t,
@@ -1872,13 +1808,12 @@ if test x$zsh_cv_rlim_t_is_longer = xyes; then
 #endif
 #include <stdio.h>
 #include <sys/resource.h>
-#include <stdlib.h>
-main() { 
+int main() {
   struct rlimit r;
   char buf[20];
   r.rlim_cur = 0;
   sprintf(buf, "%qd", r.rlim_cur);
-  exit(strcmp(buf, "0"));
+  return(strcmp(buf, "0"));
 }]])],[zsh_cv_rlim_t_is_quad_t=yes],[zsh_cv_rlim_t_is_quad_t=no],[zsh_cv_rlim_t_is_quad_t=no])])
   if test x$zsh_cv_rlim_t_is_quad_t = xyes; then
     AC_DEFINE(RLIM_T_IS_QUAD_T)
@@ -1895,8 +1830,7 @@ else
 #include <sys/time.h>
 #endif
 #include <sys/resource.h>
-#include <stdlib.h>
-  main(){struct rlimit r;r.rlim_cur=-1;exit(r.rlim_cur<0);}]])],[zsh_cv_type_rlim_t_is_unsigned=yes],[zsh_cv_type_rlim_t_is_unsigned=no],[zsh_cv_type_rlim_t_is_unsigned=no])])
+  int main(){struct rlimit r;r.rlim_cur=-1;return(r.rlim_cur<0);}]])],[zsh_cv_type_rlim_t_is_unsigned=yes],[zsh_cv_type_rlim_t_is_unsigned=no],[zsh_cv_type_rlim_t_is_unsigned=no])])
   if test x$zsh_cv_type_rlim_t_is_unsigned = xyes; then
     AC_DEFINE(RLIM_T_IS_UNSIGNED)
     DEFAULT_RLIM_T="unsigned $DEFAULT_RLIM_T"
@@ -1929,6 +1863,7 @@ zsh_LIMIT_PRESENT(RLIMIT_NPROC)
 zsh_LIMIT_PRESENT(RLIMIT_NTHR)
 zsh_LIMIT_PRESENT(RLIMIT_NOFILE)
 zsh_LIMIT_PRESENT(RLIMIT_PTHREAD)
+zsh_LIMIT_PRESENT(RLIMIT_THREADS)
 zsh_LIMIT_PRESENT(RLIMIT_RSS)
 zsh_LIMIT_PRESENT(RLIMIT_SBSIZE)
 zsh_LIMIT_PRESENT(RLIMIT_TCACHE)
@@ -1943,6 +1878,8 @@ zsh_LIMIT_PRESENT(RLIMIT_NPTS)
 zsh_LIMIT_PRESENT(RLIMIT_SWAP)
 zsh_LIMIT_PRESENT(RLIMIT_KQUEUES)
 zsh_LIMIT_PRESENT(RLIMIT_UMTXP)
+zsh_LIMIT_PRESENT(RLIMIT_PIPEBUF)
+zsh_LIMIT_PRESENT(RLIMIT_NOVMON)
 
 zsh_LIMITS_EQUAL(VMEM, vmem, RSS, rss)
 zsh_LIMITS_EQUAL(VMEM, vmem, AS, as)
@@ -1972,6 +1909,15 @@ if test x$ac_cv_func_getrusage = xyes; then
 #endif
 #include <sys/resource.h>])
 fi
+dnl On some OSes (only macOS?) ru_maxrss is in bytes (not in kilobytes).
+dnl Solaris uses pages as the unit, but ru_maxrss is set to zero anyway.
+AH_TEMPLATE(RU_MAXRSS_IS_IN_BYTES,
+[Define to 1 if ru_maxrss in struct rusage is in bytes.])
+case "$host_os" in
+  darwin*)
+    AC_DEFINE(RU_MAXRSS_IS_IN_BYTES)
+  ;;
+esac
 
 
 dnl --------------------------------------------
@@ -2003,10 +1949,29 @@ AH_TEMPLATE([PATH_DEV_FD],
 [Define to the path of the /dev/fd filesystem.])
 AC_CACHE_CHECK(for /dev/fd filesystem, zsh_cv_sys_path_dev_fd,
 [for zsh_cv_sys_path_dev_fd in /proc/self/fd /dev/fd no; do
-   test x`echo ok|(exec 3<&0; cat $zsh_cv_sys_path_dev_fd/3 2>/dev/null;)` = xok && break
+   test x`echo ok|(cat $zsh_cv_sys_path_dev_fd/3 3<&0 2>/dev/null;)` = xok && break
  done])
 if test x$zsh_cv_sys_path_dev_fd != xno; then
   AC_DEFINE_UNQUOTED(PATH_DEV_FD, "$zsh_cv_sys_path_dev_fd")
+fi
+
+dnl ----------------------------------------------------
+dnl CHECK FOR SYMLINK TO THE CURRENT EXECUTABLE IN /proc
+dnl ----------------------------------------------------
+dnl Linux: /proc/self/exe
+dnl NetBSD: /proc/curproc/exe (or /proc/self/exe, but not /proc/curproc/file)
+dnl DragonFly: /proc/curproc/file
+dnl Solaris: /proc/self/path/a.out
+AH_TEMPLATE([PROC_SELF_EXE],
+[Define to the path of the symlink to the current executable file.])
+AC_CACHE_CHECK(for symlink to the current executable in /proc,
+zsh_cv_proc_self_exe,
+[for zsh_cv_proc_self_exe in /proc/self/exe /proc/curproc/exe \
+                             /proc/curproc/file /proc/self/path/a.out no; do
+   test -L $zsh_cv_proc_self_exe && break
+done])
+if test x$zsh_cv_proc_self_exe != xno; then
+  AC_DEFINE_UNQUOTED(PROC_SELF_EXE, "$zsh_cv_proc_self_exe")
 fi
 
 dnl ---------------------------------
@@ -2155,20 +2120,6 @@ if test x$zsh_cv_header_sys_ioctl_h_ioctl_proto = xyes; then
   AC_DEFINE(IOCTL_IN_SYS_IOCTL)
 fi
 
-dnl -------------------
-dnl select() defined in <sys/socket.h>, ie BeOS R4.51
-dnl -------------------
-AH_TEMPLATE([SELECT_IN_SYS_SOCKET_H],
-[Define to 1 if select() is defined in <sys/socket.h>, ie BeOS R4.51])
-if test x$ac_cv_header_sys_select_h != xyes; then
-  AC_CACHE_CHECK(for select() in <sys/socket.h>,
-  zsh_cv_header_socket_h_select_proto,
-  [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <sys/socket.h>]], [[fd_set fd;]])],[zsh_cv_header_socket_h_select_proto=yes],[zsh_cv_header_socket_h_select_proto=no])])
-  if test x$zsh_cv_header_socket_h_select_proto = xyes; then
-    AC_DEFINE(SELECT_IN_SYS_SOCKET_H)
-  fi
-fi
-
 dnl -----------
 dnl named FIFOs
 dnl -----------
@@ -2179,9 +2130,8 @@ zsh_cv_sys_fifo,
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <sys/stat.h>
-main()
+int main()
 {
     char c;
     int fd;
@@ -2192,18 +2142,18 @@ main()
 #else
     if(mknod("/tmp/fifo$$", 0010600, 0) < 0)
 #endif
-	exit(1);
+	return(1);
     pid = fork();
     if(pid < 0)
-	exit(1);
+	return(1);
     if(pid) {
 	fd = open("/tmp/fifo$$", O_RDONLY);
-	exit(fd < 0 || read(fd, &c, 1) != 1 || c != 'x');
+	return(fd < 0 || read(fd, &c, 1) != 1 || c != 'x');
     }
     fd = open("/tmp/fifo$$", O_WRONLY);
     ret = (fd < 0 || write(fd, "x", 1) < 1);
     unlink("/tmp/fifo$$");
-    exit(ret);
+    return(ret);
 }
 ]])],[zsh_cv_sys_fifo=yes],[zsh_cv_sys_fifo=no],[zsh_cv_sys_fifo=yes])
 ])
@@ -2281,8 +2231,7 @@ zsh_cv_sys_link,
 [AC_RUN_IFELSE([AC_LANG_SOURCE([[
 #include <unistd.h>
 #include <fcntl.h>
-#include <stdlib.h>
-main()
+int main()
 {
     int ret;
     char *tmpfile, *newfile;
@@ -2291,11 +2240,11 @@ main()
     unlink(tmpfile);
     unlink(newfile);
     if(creat(tmpfile, 0644) < 0)
-	exit(1);
+	return(1);
     ret = link(tmpfile, newfile);
     unlink(tmpfile);
     unlink(newfile);
-    exit(ret<0);
+    return(ret<0);
 }
 ]])],[zsh_cv_sys_link=yes],[zsh_cv_sys_link=no],[zsh_cv_sys_link=yes])])
 AH_TEMPLATE([HAVE_LINK],
@@ -2303,159 +2252,6 @@ AH_TEMPLATE([HAVE_LINK],
 if test x$zsh_cv_sys_link = xyes; then
   AC_DEFINE(HAVE_LINK)
 fi
-
-dnl -----------
-dnl test for whether kill(pid, 0) where pid doesn't exit
-dnl should set errno to ESRCH, but some like BeOS R4.51 set to EINVAL
-dnl -----------
-AC_CACHE_CHECK(if kill(pid, 0) returns ESRCH correctly,
-zsh_cv_sys_killesrch,
-[AC_RUN_IFELSE([AC_LANG_SOURCE([[
-#include <unistd.h>
-#include <signal.h>
-#include <errno.h>
-#include <stdlib.h>
-main()
-{
-    int pid = (getpid() + 10000) & 0xffffff;
-    while (pid && (kill(pid, 0) == 0 || errno != ESRCH)) pid >>= 1;
-    exit(errno!=ESRCH);
-}
-]])],[zsh_cv_sys_killesrch=yes],[zsh_cv_sys_killesrch=no],[zsh_cv_sys_killesrch=yes])])
-AH_TEMPLATE([BROKEN_KILL_ESRCH],
-[Define to 1 if kill(pid, 0) doesn't return ESRCH, ie BeOS R4.51.])
-if test x$zsh_cv_sys_killesrch = xno; then
-  AC_DEFINE(BROKEN_KILL_ESRCH)
-fi
-
-dnl -----------
-dnl if POSIX, test for working sigsuspend().
-dnl for instance, BeOS R4.51 is broken.
-dnl -----------
-AH_TEMPLATE([BROKEN_POSIX_SIGSUSPEND],
-Define to 1 if sigsuspend() is broken, ie BeOS R4.51.])
-if test x$signals_style = xPOSIX_SIGNALS; then
-    AC_CACHE_CHECK(if POSIX sigsuspend() works,
-    zsh_cv_sys_sigsuspend,
-    [AC_RUN_IFELSE([AC_LANG_SOURCE([[
-#include <signal.h>
-#include <unistd.h>
-#include <stdlib.h>
-int child=0;
-void handler(sig)
-    int sig;
-{if(sig==SIGCHLD) child=1;}
-main() {
-    struct sigaction act;
-    sigset_t set;
-    int pid, ret;
-    act.sa_handler = &handler;
-    sigfillset(&act.sa_mask);
-    act.sa_flags = 0;
-    sigaction(SIGCHLD, &act, 0);
-    sigfillset(&set);
-    sigprocmask(SIG_SETMASK, &set, 0);
-    pid=fork();
-    if(pid==0) return 0;
-    if(pid>0) {
-    sigemptyset(&set);
-        ret=sigsuspend(&set);
-        exit(child==0);
-    }
-}
-]])],[zsh_cv_sys_sigsuspend=yes],[zsh_cv_sys_sigsuspend=no],[zsh_cv_sys_sigsuspend=yes])])
-    if test x$zsh_cv_sys_sigsuspend = xno; then
-      AC_DEFINE(BROKEN_POSIX_SIGSUSPEND)
-    fi
-fi
-
-dnl -----------
-dnl if found tcsetpgrp, test to see if it actually works
-dnl for instance, BeOS R4.51 does not support it yet
-dnl -----------
-AH_TEMPLATE([BROKEN_TCSETPGRP],
-[Define to 1 if tcsetpgrp() doesn't work, ie BeOS R4.51.])
-AC_ARG_WITH(tcsetpgrp,
-AS_HELP_STRING([--with-tcsetpgrp],[assumes that tcsetpgrp() exists and works correctly]),[
-case "x$withval" in
-    xyes) zsh_working_tcsetpgrp=yes;;
-    xno)  zsh_working_tcsetpgrp=no;;
-    *)    AC_MSG_ERROR(please use --with-tcsetpgrp=yes or --with-tcsetpgrp=no);;
-esac],[zsh_working_tcsetpgrp=check])
-if test "x$ac_cv_func_tcsetpgrp" = xyes; then
-case "x$zsh_working_tcsetpgrp" in
-  xcheck)
-    trap "" TTOU > /dev/null 2>&1 || :
-    AC_CACHE_CHECK(if tcsetpgrp() actually works,
-    zsh_cv_sys_tcsetpgrp,
-    [AC_RUN_IFELSE([AC_LANG_SOURCE([[
-#include <sys/types.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <stdlib.h>
-main() {
-    int fd;
-    int ret;
-    fd=open("/dev/tty", O_RDWR);
-    if (fd < 0) exit(2);
-    ret=tcsetpgrp(fd, tcgetpgrp(fd));
-    if (ret < 0) exit(1);
-    exit(0);
-}
-]])],[zsh_cv_sys_tcsetpgrp=yes],[
-case $? in
-    1) zsh_cv_sys_tcsetpgrp=no;;
-    2) zsh_cv_sys_tcsetpgrp=notty;;
-    *) zsh_cv_sys_tcsetpgrp=error;;
-esac
-      ],[zsh_cv_sys_tcsetpgrp=yes])])
-    case "x$zsh_cv_sys_tcsetpgrp" in
-      xno)    AC_DEFINE(BROKEN_TCSETPGRP);;
-      xyes)   :;;
-      xnotty) AC_MSG_ERROR([no controlling tty
-Try running configure with --with-tcsetpgrp or --without-tcsetpgrp]);;
-      *)      AC_MSG_ERROR([unexpected return status]);;
-    esac
-    trap - TTOU > /dev/null 2>&1 || :
-    ;;
-  xyes) :;;
-  xno)  AC_DEFINE(BROKEN_TCSETPGRP);;
-  *)    AC_MSG_ERROR([unexpected value zsh_working_tcsetpgrp=$zsh_working_tcsetpgrp]);;
-esac
-fi
-
-dnl -----------
-dnl test for faked getpwnam() entry, ie a single entry returned for any username
-dnl for instance, BeOS R4.51 is not multiuser yet, and fakes getpwnam()
-dnl test by looking up two usernames that shouldn't succeed, and compare entry
-dnl -----------
-AH_TEMPLATE([GETPWNAM_FAKED],
-[Define to 1 if getpwnam() is faked, ie BeOS R4.51.])
-if test x$ac_cv_func_getpwnam = xyes; then
-    AC_CACHE_CHECK(if getpwnam() is faked,
-    zsh_cv_sys_getpwnam_faked,
-    [AC_RUN_IFELSE([AC_LANG_SOURCE([[
-#include <pwd.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
-main() {
-    struct passwd *pw1, *pw2;
-    char buf[1024], name[1024];
-    sprintf(buf, "%d:%d", getpid(), rand());
-    pw1=getpwnam(buf);
-    if (pw1) strcpy(name, pw1->pw_name);
-    sprintf(buf, "%d:%d", rand(), getpid());
-    pw2=getpwnam(buf);
-    exit(pw1!=0 && pw2!=0 && !strcmp(name, pw2->pw_name));
-}
-]])],[zsh_cv_sys_getpwnam_faked=no],[zsh_cv_sys_getpwnam_faked=yes],[zsh_cv_sys_getpwnam_faked=no])])
-    if test x$zsh_cv_sys_getpwnam_faked = xyes; then
-      AC_DEFINE(GETPWNAM_FAKED)
-    fi
-fi
-
 
 dnl ---------------
 dnl check for the type of third argument of accept
@@ -2767,20 +2563,17 @@ elif test "x$dynamic" = xyes; then
    zsh_cv_sys_elf,
    [AC_RUN_IFELSE([AC_LANG_SOURCE([[/* Test for whether ELF binaries are produced */
 #include <fcntl.h>
-#include <stdlib.h>
 #include <unistd.h>
-main(argc, argv)
-int argc;
-char *argv[];
+int main(int argc, char *argv[])
 {
 	char b[4];
 	int i = open(argv[0],O_RDONLY);
 	if(i == -1) 
-		exit(1); /* fail */
+		return(1); /* fail */
 	if(read(i,b,4)==4 && b[0]==127 && b[1]=='E' && b[2]=='L' && b[3]=='F')
-		exit(0); /* succeed (yes, it's ELF) */
+		return(0); /* succeed (yes, it's ELF) */
 	else
-		exit(1); /* fail */
+		return(1); /* fail */
 }]])],[zsh_cv_sys_elf=yes],[zsh_cv_sys_elf=no],[zsh_cv_sys_elf=yes])])
 
   # We use [0-9]* in case statements, so need to change quoting
@@ -2845,13 +2638,15 @@ char *argv[];
   fi
   case "$host_os" in
     osf*) DLLDFLAGS="${DLLDFLAGS=-shared -expect_unresolved '*'}" ;;
-    *freebsd*|*netbsd*|linux*|irix*|gnu*|interix*|dragonfly*) DLLDFLAGS="${DLLDFLAGS=-shared}" ;;
+    *freebsd*|*netbsd*|linux*|irix*|gnu*|interix*|dragonfly*|haiku*) DLLDFLAGS="${DLLDFLAGS=-shared}" ;;
     sunos*)       DLLDFLAGS="${DLLDFLAGS=-assert nodefinitions}" ;;
     sysv4*|esix*) DLLDFLAGS="${DLLDFLAGS=-G $ldflags}" ;;
     aix*)         DLLDFLAGS="${DLLDFLAGS=-G -bexpall -lc}" ;;
     solaris*|sysv4*|esix*) DLLDFLAGS="${DLLDFLAGS=-G}" ;;
-    darwin*)      DLLDFLAGS="${DLLDFLAGS=-bundle -flat_namespace -undefined suppress}" ;;
-    beos*|haiku*) DLLDFLAGS="${DLLDFLAGS=-nostart}" ;;
+    darwin[[0-9]].*|darwin1?.*|darwin2[01].*)
+                  DLLDFLAGS="${DLLDFLAGS=-bundle -flat_namespace -undefined suppress}" ;;
+    darwin*)      DLLDFLAGS="${DLLDFLAGS=-bundle -flat_namespace -undefined dynamic_lookup}" ;;
+    beos*) DLLDFLAGS="${DLLDFLAGS=-nostart}" ;;
     openbsd*)
       if test x$zsh_cv_sys_elf = xyes; then
 	DLLDFLAGS="${DLLDFLAGS=-shared -fPIC}"
@@ -2916,13 +2711,12 @@ LDFLAGS="$old_LDFLAGS")
   AC_CACHE_CHECK(if your dlsym() needs a leading underscore,
    zsh_cv_func_dlsym_needs_underscore,
    [echo failed >conftestval && cat >conftest.c <<EOM
-fred () { }
+void fred () { }
 EOM
     AC_TRY_COMMAND($CC -c $CFLAGS $CPPFLAGS $DLCFLAGS conftest.c 1>&AS_MESSAGE_LOG_FD) &&
     AC_TRY_COMMAND($DLLD $LDFLAGS $DLLDFLAGS -o conftest.$DL_EXT conftest.o 1>&AS_MESSAGE_LOG_FD) &&
     AC_RUN_IFELSE([AC_LANG_SOURCE([[
 #include <stdio.h>
-#include <stdlib.h>
 #ifdef HPUX10DYNAMIC
 #include <dl.h>
 #define RTLD_LAZY BIND_DEFERRED
@@ -2949,16 +2743,16 @@ char *zsh_gl_sym_addr ;
 
 extern int fred() ;
 
-main()
+int main()
 {
     void * handle ;
     void * symbol ;
     FILE *f=fopen("conftestval", "w");
-    if (!f) exit(1);
+    if (!f) return(1);
     handle = dlopen("./conftest.$DL_EXT", RTLD_LAZY) ;
     if (handle == NULL) {
         fprintf (f, "dlopen failed") ;
-            exit(1);
+            return(1);
     }
     symbol = dlsym(handle, "fred") ;
     if (symbol == NULL) {
@@ -2966,13 +2760,13 @@ main()
         symbol = dlsym(handle, "_fred") ;
         if (symbol == NULL) {
             fprintf (f, "dlsym failed") ;
-                exit(1);
+                return(1);
                 }
         fprintf (f, "yes") ;
     }
     else
         fprintf (f, "no") ;
-    exit(0);
+    return(0);
 }]])],[zsh_cv_func_dlsym_needs_underscore=`cat conftestval`],[zsh_cv_func_dlsym_needs_underscore=failed
     dynamic=no],[zsh_cv_func_dlsym_needs_underscore=no])])
   if test "x$zsh_cv_func_dlsym_needs_underscore" = xyes; then
@@ -3190,16 +2984,6 @@ AH_TOP([/***** begin user configuration section *****/
 
 /* Define this to be the location of your password file */
 #define PASSWD_FILE "/etc/passwd"
-
-/* Define this to be the name of your NIS/YP password *
- * map (if applicable)                                */
-#define PASSWD_MAP "passwd.byname"
-
-/* Define to 1 if you want user names to be cached */
-#define CACHE_USERNAMES 1
-
-/* Define to 1 if system supports job control */
-#define JOB_CONTROL 1
 
 /* Define this if you use "suspended" instead of "stopped" */
 #define USE_SUSPENDED 1

@@ -135,19 +135,6 @@ struct mathfunc {
 #define STRMATHFUNC(name, func, id) \
     { NULL, name, MFF_STR, NULL, func, NULL, 0, 0, id }
 
-/* Character tokens are sometimes casted to (unsigned char)'s.         * 
- * Unfortunately, some compilers don't correctly cast signed to        * 
- * unsigned promotions; i.e. (int)(unsigned char)((char) -1) evaluates * 
- * to -1, instead of 255 like it should.  We circumvent the troubles   * 
- * of such shameful delinquency by casting to a larger unsigned type   * 
- * then back down to unsigned char.                                    */
-
-#ifdef BROKEN_SIGNED_TO_UNSIGNED_CASTING
-# define STOUC(X)	((unsigned char)(unsigned short)(X))
-#else
-# define STOUC(X)	((unsigned char)(X))
-#endif
-
 /* Meta together with the character following Meta denotes the character *
  * which is the exclusive or of 32 and the character following Meta.     *
  * This is used to represent characters which otherwise has special      *
@@ -309,6 +296,9 @@ enum {
 /*
  * Lexical tokens: unlike the character tokens above, these never
  * appear in strings and don't necessarily represent a single character.
+ *
+ * See Src/lex.c:tokstrings[] for hints on what these mean.  Note that
+ * SEPER or SEMI are both stringified as ";".
  */
 
 enum lextok {
@@ -628,7 +618,7 @@ union linkroot {
 /* Specific elements of linked lists */
 /*************************************/
 
-typedef void (*voidvoidfnptr_t) _((void));
+typedef void (*voidvoidfnptr_t) (void);
 
 /*
  * Element of the prepromptfns list.
@@ -688,7 +678,7 @@ struct timedfn {
 #define COND_MOD   18
 #define COND_MODI  19
 
-typedef int (*CondHandler) _((char **, int));
+typedef int (*CondHandler) (char **, int);
 
 struct conddef {
     Conddef next;		/* next in list                       */
@@ -752,18 +742,23 @@ struct multio {
 /* lvalue for variable assignment/expansion */
 
 struct value {
-    int isarr;
     Param pm;		/* parameter node                      */
-    int flags;		/* flags defined below                 */
+    char **arr;		/* cache for hash turned into array */
+    int scanflags;	/* set of SCANPM flags as well as an is-array
+			 * marker. The field must be non-zero iff the
+			 * value struct represents an array or an
+			 * associative array. For plain arrays, use
+			 * SCANPM_ARRONLY. */
+    int valflags;	/* flags defined below                 */
     int start;		/* first element of array slice, or -1 */
     int end;		/* 1-rel last element of array slice, or -1 */
-    char **arr;		/* cache for hash turned into array */
 };
 
 enum {
     VALFLAG_INV =	0x0001,	/* We are performing inverse subscripting */
     VALFLAG_EMPTY =	0x0002,	/* Subscripted range is empty */
-    VALFLAG_SUBST =     0x0004  /* Substitution, so apply padding, case flags */
+    VALFLAG_SUBST =	0x0004,	/* Substitution, so apply padding, case flags */
+    VALFLAG_REFSLICE=	0x0008	/* Value is a reference to an array slice */
 };
 
 #define MAX_ARRLEN    262144
@@ -859,7 +854,7 @@ struct eccstr {
     int nfunc;
 
     /* Hash of str. */
-    int hashval;
+    unsigned hashval;
 };
 
 /*
@@ -1125,8 +1120,8 @@ struct process {
     char text[JOBTEXTSIZE];	/* text to print when 'jobs' is run */
     int status;			/* return code from waitpid/wait3() */
     child_times_t ti;
-    struct timeval bgtime;	/* time job was spawned             */
-    struct timeval endtime;	/* time job exited                  */
+    struct timespec bgtime;	/* time job was spawned             */
+    struct timespec endtime;	/* time job exited                  */
 };
 
 struct execstack {
@@ -1174,28 +1169,28 @@ struct dirsav {
 /* Definitions for Hash Tables */
 /*******************************/
 
-typedef void *(*VFunc) _((void *));
-typedef void (*FreeFunc) _((void *));
+typedef void *(*VFunc) (void *);
+typedef void (*FreeFunc) (void *);
 
-typedef unsigned (*HashFunc)       _((const char *));
-typedef void     (*TableFunc)      _((HashTable));
+typedef unsigned (*HashFunc)       (const char *);
+typedef void     (*TableFunc)      (HashTable);
 /*
  * Note that this is deliberately "char *", not "const char *",
  * since the AddNodeFunc is passed a pointer to a string that
  * will be stored and later freed.
  */
-typedef void     (*AddNodeFunc)    _((HashTable, char *, void *));
-typedef HashNode (*GetNodeFunc)    _((HashTable, const char *));
-typedef HashNode (*RemoveNodeFunc) _((HashTable, const char *));
-typedef void     (*FreeNodeFunc)   _((HashNode));
-typedef int      (*CompareFunc)    _((const char *, const char *));
+typedef void     (*AddNodeFunc)    (HashTable, char *, void *);
+typedef HashNode (*GetNodeFunc)    (HashTable, const char *);
+typedef HashNode (*RemoveNodeFunc) (HashTable, const char *);
+typedef void     (*FreeNodeFunc)   (HashNode);
+typedef int      (*CompareFunc)    (const char *, const char *);
 
 /* type of function that is passed to *
  * scanhashtable or scanmatchtable    */
-typedef void     (*ScanFunc)       _((HashNode, int));
-typedef void     (*ScanTabFunc)    _((HashTable, ScanFunc, int));
+typedef void     (*ScanFunc)       (HashNode, int);
+typedef void     (*ScanTabFunc)    (HashTable, ScanFunc, int);
 
-typedef void (*PrintTableStats) _((HashTable));
+typedef void (*PrintTableStats) (HashTable);
 
 /* Hash table for standard open hashing. Instances of struct hashtable can be *
  * created only by newhashtable(). In fact, this function creates an instance *
@@ -1362,7 +1357,7 @@ struct funcstack {
 
 /* node in list of function call wrappers */
 
-typedef int (*WrapFunc) _((Eprog, FuncWrap, char *));
+typedef int (*WrapFunc) (Eprog, FuncWrap, char *);
 
 struct funcwrap {
     FuncWrap next;
@@ -1438,8 +1433,8 @@ enum {
  * builtin structure.
  */
 
-typedef int (*HandlerFunc) _((char *, char **, Options, int));
-typedef int (*HandlerFuncAssign) _((char *, char **, LinkList, Options, int));
+typedef int (*HandlerFunc) (char *, char **, Options, int);
+typedef int (*HandlerFuncAssign) (char *, char **, LinkList, Options, int);
 #define NULLBINCMD ((HandlerFunc) 0)
 
 struct builtin {
@@ -1536,10 +1531,10 @@ struct module {
 /* Module record is an alias */
 #define MOD_ALIAS   (1<<6)
 
-typedef int (*Module_generic_func) _((void));
-typedef int (*Module_void_func) _((Module));
-typedef int (*Module_features_func) _((Module, char ***));
-typedef int (*Module_enables_func) _((Module, int **));
+typedef int (*Module_generic_func) (void);
+typedef int (*Module_void_func) (Module);
+typedef int (*Module_features_func) (Module, char ***);
+typedef int (*Module_enables_func) (Module, int **);
 
 struct linkedmod {
     char *name;
@@ -1584,11 +1579,11 @@ struct feature_enables {
 
 /* C-function hooks */
 
-typedef int (*Hookfn) _((Hookdef, void *));
+typedef int (*Hookfn) (Hookdef, void *);
 
 struct hookdef {
     Hookdef next;
-    char *name;
+    const char *name;
     Hookfn def;
     int flags;
     LinkList funcs;
@@ -1677,7 +1672,7 @@ enum zpc_chars {
     ZPC_KSH_BANG,               /* ! for !(...) in KSH_GLOB */
     ZPC_KSH_BANG2,              /* ! for !(...) in KSH_GLOB, untokenised */
     ZPC_KSH_AT,                 /* @ for @(...) in KSH_GLOB */
-    ZPC_COUNT			/* Number of special chararacters */
+    ZPC_COUNT			/* Number of special characters */
 };
 
 /*
@@ -1799,33 +1794,33 @@ typedef const struct gsu_array *GsuArray;
 typedef const struct gsu_hash *GsuHash;
 
 struct gsu_scalar {
-    char *(*getfn) _((Param));
-    void (*setfn) _((Param, char  *));
-    void (*unsetfn) _((Param, int));
+    char *(*getfn) (Param);
+    void (*setfn) (Param, char  *);
+    void (*unsetfn) (Param, int);
 };
 
 struct gsu_integer {
-    zlong (*getfn) _((Param));
-    void (*setfn) _((Param, zlong));
-    void (*unsetfn) _((Param, int));
+    zlong (*getfn) (Param);
+    void (*setfn) (Param, zlong);
+    void (*unsetfn) (Param, int);
 };
 
 struct gsu_float {
-    double (*getfn) _((Param));
-    void (*setfn) _((Param, double));
-    void (*unsetfn) _((Param, int));
+    double (*getfn) (Param);
+    void (*setfn) (Param, double);
+    void (*unsetfn) (Param, int);
 };
 
 struct gsu_array {
-    char **(*getfn) _((Param));
-    void (*setfn) _((Param, char **));
-    void (*unsetfn) _((Param, int));
+    char **(*getfn) (Param);
+    void (*setfn) (Param, char **);
+    void (*unsetfn) (Param, int);
 };
 
 struct gsu_hash {
-    HashTable (*getfn) _((Param));
-    void (*setfn) _((Param, HashTable));
-    void (*unsetfn) _((Param, int));
+    HashTable (*getfn) (Param);
+    void (*setfn) (Param, HashTable);
+    void (*unsetfn) (Param, int);
 };
 
 
@@ -1862,8 +1857,9 @@ struct param {
 	GsuHash h;
     } gsu;
 
-    int base;			/* output base or floating point prec    */
-    int width;			/* field width                           */
+    int base;			/* output base or floating point prec or */
+ 				/* for namerefs, locallevel of reference */
+    int width;			/* field width or nameref subscript idx  */
     char *env;			/* location in environment, if exported  */
     char *ename;		/* name of corresponding environment var */
     Param old;			/* old struct for use with local         */
@@ -1942,9 +1938,12 @@ struct tieddata {
 				 */
 #define PM_HASHELEM     (1<<28) /* is a hash-element */
 #define PM_NAMEDDIR     (1<<29) /* has a corresponding nameddirtab entry    */
+#define PM_NAMEREF      (1<<30) /* pointer to a different parameter         */
+
+#define PM_NEWREF	PM_SINGLE	/* Overload in for-loop namerefs    */
 
 /* The option string corresponds to the first of the variables above */
-#define TYPESET_OPTSTR "aiEFALRZlurtxUhHTkz"
+#define TYPESET_OPTSTR "aiEFALRZlurtxUhHT"
 
 /* These typeset options take an optional numeric argument */
 #define TYPESET_OPTNUM "LRZiEF"
@@ -1967,10 +1966,10 @@ struct tieddata {
 				  * elements
 				  */
 #define SCANPM_CHECKING   (1<<10) /* Check if set, no need to create */
-/* "$foo[@]"-style substitution
- * Only sign bit is significant
- */
-#define SCANPM_ISVAR_AT   ((int)(((unsigned int)-1)<<15))
+#define SCANPM_NOEXEC     (1<<11) /* No command substitutions, etc. */
+#define SCANPM_NONAMESPC  (1<<12) /* namespace syntax not allowed */
+#define SCANPM_NONAMEREF  (1<<13) /* named references are not followed */
+#define SCANPM_ISVAR_AT   (1<<14) /* "$foo[@]"-style substitution */
 
 /*
  * Flags for doing matches inside parameter substitutions, i.e.
@@ -2185,6 +2184,7 @@ typedef groupset *Groupset;
 #define PRINT_LINE	        (1<<6)
 #define PRINT_POSIX_EXPORT	(1<<7)
 #define PRINT_POSIX_READONLY	(1<<8)
+#define PRINT_WITH_NAMESPACE	(1<<9)
 
 /* flags for printing for the whence builtin */
 #define PRINT_WHENCE_CSH	(1<<7)
@@ -2220,8 +2220,6 @@ enum noerrexit_bits {
     NOERREXIT_EXIT = 1,
     /* Suppress ERR_RETURN: per function call */
     NOERREXIT_RETURN = 2,
-    /* NOERREXIT only needed on way down */
-    NOERREXIT_UNTIL_EXEC = 4,
     /* Force exit on SIGINT */
     NOERREXIT_SIGNAL = 8
 };
@@ -2658,22 +2656,27 @@ struct ttyinfo {
 #define TCDELLINE      16
 #define TCNEXTTAB      17
 #define TCBOLDFACEBEG  18
-#define TCSTANDOUTBEG  19
-#define TCUNDERLINEBEG 20
-#define TCALLATTRSOFF  21
-#define TCSTANDOUTEND  22
-#define TCUNDERLINEEND 23
-#define TCHORIZPOS     24
-#define TCUPCURSOR     25
-#define TCDOWNCURSOR   26
-#define TCLEFTCURSOR   27
-#define TCRIGHTCURSOR  28
-#define TCSAVECURSOR   29
-#define TCRESTRCURSOR  30
-#define TCBACKSPACE    31
-#define TCFGCOLOUR     32
-#define TCBGCOLOUR     33
-#define TC_COUNT       34
+#define TCFAINTBEG     19
+#define TCSTANDOUTBEG  20
+#define TCUNDERLINEBEG 21
+#define TCITALICSBEG   22
+#define TCALLATTRSOFF  23
+#define TCSTANDOUTEND  24
+#define TCUNDERLINEEND 25
+#define TCITALICSEND   26
+#define TCHORIZPOS     27
+#define TCUPCURSOR     28
+#define TCDOWNCURSOR   29
+#define TCLEFTCURSOR   30
+#define TCRIGHTCURSOR  31
+#define TCSAVECURSOR   32
+#define TCRESTRCURSOR  33
+#define TCBACKSPACE    34
+#define TCFGCOLOUR     35
+#define TCBGCOLOUR     36
+#define TCCURINV       37
+#define TCCURVIS       38
+#define TC_COUNT       39
 
 #define tccan(X) (tclen[X])
 
@@ -2688,38 +2691,27 @@ struct ttyinfo {
 #endif
 
 #define TXTBOLDFACE   0x0001
-#define TXTSTANDOUT   0x0002
-#define TXTUNDERLINE  0x0004
-#define TXTFGCOLOUR   0x0008
-#define TXTBGCOLOUR   0x0010
+#define TXTFAINT      0x0002
+#define TXTSTANDOUT   0x0004
+#define TXTUNDERLINE  0x0008
+#define TXTITALIC     0x0010
+#define TXTFGCOLOUR   0x0020
+#define TXTBGCOLOUR   0x0040
 
-#define TXT_ATTR_ON_MASK   0x001F
+#define TXT_ATTR_ALL  0x007F
 
-#define txtisset(X)  (txtattrmask & (X))
-#define txtset(X)    (txtattrmask |= (X))
-#define txtunset(X)  (txtattrmask &= ~(X))
-
-#define TXTNOBOLDFACE	0x0020
-#define TXTNOSTANDOUT	0x0040
-#define TXTNOUNDERLINE	0x0080
-#define TXTNOFGCOLOUR	0x0100
-#define TXTNOBGCOLOUR	0x0200
-
-#define TXT_ATTR_OFF_MASK  0x03E0
-/* Bits to shift off right to get on */
-#define TXT_ATTR_OFF_ON_SHIFT 5
-#define TXT_ATTR_OFF_FROM_ON(attr)	\
-    (((attr) & TXT_ATTR_ON_MASK) << TXT_ATTR_OFF_ON_SHIFT)
-#define TXT_ATTR_ON_FROM_OFF(attr)	\
-    (((attr) & TXT_ATTR_OFF_MASK) >> TXT_ATTR_OFF_ON_SHIFT)
 /*
  * Indicates to zle_refresh.c that the character entry is an
  * index into the list of multiword symbols.
  */
 #define TXT_MULTIWORD_MASK  0x0400
 
-/* used when, e.g an invalid colour is specified */
-#define TXT_ERROR 0x0800
+/* Used when, e.g an invalid colour is specified. Also used in REFRESH_ELEMENT
+ * to indicate that attributes should remain unchanged. */
+#define TXT_ERROR 0xF00000F000000003
+
+/* Mask for font weight */
+#define TXT_ATTR_FONT_WEIGHT     (TXTBOLDFACE|TXTFAINT)
 
 /* Mask for colour to use in foreground */
 #define TXT_ATTR_FG_COL_MASK     0x000000FFFFFF0000
@@ -2735,26 +2727,19 @@ struct ttyinfo {
 /* Flag to indicate that background is a 24-bit colour */
 #define TXT_ATTR_BG_24BIT        0x8000
 
-/* Things to turn on, including values for the colour elements */
-#define TXT_ATTR_ON_VALUES_MASK	\
-    (TXT_ATTR_ON_MASK|TXT_ATTR_FG_COL_MASK|TXT_ATTR_BG_COL_MASK|\
-     TXT_ATTR_FG_24BIT|TXT_ATTR_BG_24BIT)
-
 /* Mask out everything to do with setting a foreground colour */
-#define TXT_ATTR_FG_ON_MASK \
+#define TXT_ATTR_FG_MASK \
     (TXTFGCOLOUR|TXT_ATTR_FG_COL_MASK|TXT_ATTR_FG_24BIT)
 
 /* Mask out everything to do with setting a background colour */
-#define TXT_ATTR_BG_ON_MASK \
+#define TXT_ATTR_BG_MASK \
     (TXTBGCOLOUR|TXT_ATTR_BG_COL_MASK|TXT_ATTR_BG_24BIT)
 
 /* Mask out everything to do with activating colours */
-#define TXT_ATTR_COLOUR_ON_MASK			\
-    (TXT_ATTR_FG_ON_MASK|TXT_ATTR_BG_ON_MASK)
+#define TXT_ATTR_COLOUR_MASK \
+    (TXT_ATTR_FG_MASK|TXT_ATTR_BG_MASK)
 
-#define txtchangeisset(T,X)	((T) & (X))
 #define txtchangeget(T,A)	(((T) & A ## _MASK) >> A ## _SHIFT)
-#define txtchangeset(T, X, Y)	((void)(T && (*T &= ~(Y), *T |= (X))))
 
 /*
  * For outputting sequences to change colour: specify foreground
@@ -2762,7 +2747,6 @@ struct ttyinfo {
  */
 #define COL_SEQ_FG	(0)
 #define COL_SEQ_BG	(1)
-#define COL_SEQ_COUNT	(2)
 
 struct color_rgb {
     unsigned int red, green, blue;
@@ -2778,11 +2762,7 @@ enum {
     /* Raw output: use stdout rather than shout */
     TSC_RAW = 0x0001,
     /* Output to current prompt buffer: only used when assembling prompt */
-    TSC_PROMPT = 0x0002,
-    /* Mask to get the output mode */
-    TSC_OUTPUT_MASK = 0x0003,
-    /* Change needs reset of other attributes */
-    TSC_DIRTY = 0x0004
+    TSC_PROMPT = 0x0002
 };
 
 /****************************************/
@@ -3006,7 +2986,7 @@ enum errflag_bits {
 /* Sorting */
 /***********/
 
-typedef int (*CompareFn) _((const void *, const void *));
+typedef int (*CompareFn) (const void *, const void *);
 
 enum {
     SORTIT_ANYOLDHOW = 0,	/* Defaults */
@@ -3064,13 +3044,13 @@ struct hist_stack {
     short *chwords;
     int chwordlen;
     int chwordpos;
-    int (*hgetc) _((void));
-    void (*hungetc) _((int));
-    void (*hwaddc) _((int));
-    void (*hwbegin) _((int));
-    void (*hwabort) _((void));
-    void (*hwend) _((void));
-    void (*addtoline) _((int));
+    int (*hgetc) (void);
+    void (*hungetc) (int);
+    void (*hwaddc) (int);
+    void (*hwbegin) (int);
+    void (*hwabort) (void);
+    void (*hwend) (void);
+    void (*addtoline) (int);
     unsigned char *cstack;
     int csp;
     int hist_keep_comment;
@@ -3240,7 +3220,7 @@ enum {
 
 /* compctl entry point pointers */
 
-typedef int (*CompctlReadFn) _((char *, char **, Options, char *));
+typedef int (*CompctlReadFn) (char *, char **, Options, char *);
 
 /* ZLE entry point pointer */
 
@@ -3257,7 +3237,10 @@ enum {
     ZLE_CMD_REFRESH,
     ZLE_CMD_SET_KEYMAP,
     ZLE_CMD_GET_KEY,
-    ZLE_CMD_SET_HIST_LINE
+    ZLE_CMD_SET_HIST_LINE,
+    ZLE_CMD_PREEXEC,
+    ZLE_CMD_POSTEXEC,
+    ZLE_CMD_CHPWD
 };
 
 /***************************************/

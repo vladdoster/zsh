@@ -423,7 +423,7 @@ initlextabs(void)
     for (t0 = 0; lx2[t0]; t0++)
 	lexact2[(int)lx2[t0]] = t0;
     lexact2['&'] = LX2_BREAK;
-    lexact2[STOUC(Meta)] = LX2_META;
+    lexact2[(unsigned char) Meta] = LX2_META;
     lextok2['*'] = Star;
     lextok2['?'] = Quest;
     lextok2['{'] = Inbrace;
@@ -722,7 +722,7 @@ gettok(void)
 	}
 	return peek;
     }
-    switch (lexact1[STOUC(c)]) {
+    switch (lexact1[(unsigned char) c]) {
     case LX1_BKSLASH:
 	d = hgetc();
 	if (d == '\n')
@@ -937,8 +937,8 @@ static enum lextok
 gettokstr(int c, int sub)
 {
     int bct = 0, pct = 0, brct = 0, seen_brct = 0, fdpar = 0;
-    int intpos = 1, in_brace_param = 0;
-    int inquote, unmatched = 0;
+    int intpos = 1, in_brace_param = 0, cmdsubst = 0;
+    int inquote, unmatched = 0, in_pattern = 0;
     enum lextok peek;
 #ifdef DEBUG
     int ocmdsp = cmdsp;
@@ -960,8 +960,8 @@ gettokstr(int c, int sub)
 	if (inbl && !in_brace_param && !pct)
 	    act = LX2_BREAK;
 	else {
-	    act = lexact2[STOUC(c)];
-	    c = lextok2[STOUC(c)];
+	    act = lexact2[(unsigned char) c];
+	    c = lextok2[(unsigned char) c];
 	}
 	switch (act) {
 	case LX2_BREAK:
@@ -1135,7 +1135,7 @@ gettokstr(int c, int sub)
 	    c = Inpar;
 	    break;
 	case LX2_INBRACE:
-	    if (isset(IGNOREBRACES) || sub)
+	    if ((isset(IGNOREBRACES) && !cmdsubst) || sub)
 		c = '{';
 	    else {
 		if (!lexbuf.len && incmdpos) {
@@ -1157,8 +1157,11 @@ gettokstr(int c, int sub)
 	    if (in_brace_param) {
 		cmdpop();
 	    }
-	    if (bct-- == in_brace_param)
-		in_brace_param = 0;
+	    if (bct-- == in_brace_param) {
+		if (cmdsubst)
+		    cmdpop();
+		in_brace_param = cmdsubst = in_pattern = 0;
+	    }
 	    c = Outbrace;
 	    break;
 	case LX2_COMMA:
@@ -1230,7 +1233,7 @@ gettokstr(int c, int sub)
 		    else {
 			int sav = *lexbuf.ptr;
 			*lexbuf.ptr = '\0';
-			t = itype_end(t, IIDENT, 0);
+			t = itype_end(t, INAMESPC, 0);
 			if (t < lexbuf.ptr) {
 			    skipparens(Inbrack, Outbrack, &t);
 			} else {
@@ -1263,7 +1266,7 @@ gettokstr(int c, int sub)
 		    continue;
 	    } else {
 		add(Bnull);
-		if (c == STOUC(Meta)) {
+		if (c == (unsigned char) Meta) {
 		    c = hgetc();
 #ifdef DEBUG
 		    if (lexstop) {
@@ -1306,7 +1309,8 @@ gettokstr(int c, int sub)
 			    lexbuf.ptr--, lexbuf.len--;
 			else
 			    break;
-		    }
+		    } else if (in_pattern && c == '/')
+			add(Bnull);
 		    add(c);
 		}
 		ALLOWHIST
@@ -1394,27 +1398,46 @@ gettokstr(int c, int sub)
 	     */
 	    c = Dash;
            break;
-       case LX2_BANG:
-           /*
-            * Same logic as Dash, for ! to perform negation in range.
-            */
-           if (seen_brct)
-               c = Bang;
-           else
-               c = '!';
-       }
-       add(c);
-       c = hgetc();
+	case LX2_BANG:
+	    /*
+	     * Same logic as Dash, for ! to perform negation in range.
+	     */
+	    if (seen_brct && brct)
+		c = Bang;
+	    else
+		c = '!';
+	    break;
+	case LX2_OTHER:
+	    if (in_brace_param) {
+		if (c == '/') {
+		    if (in_pattern == 0)
+			in_pattern = 2;
+		    else
+			--in_pattern;
+		}
+	    }
+	}
+	add(c);
+	c = hgetc();
 	if (intpos)
 	    intpos--;
 	if (lexstop)
 	    break;
+	if (!cmdsubst && in_brace_param && act == LX2_STRING &&
+	    (c == '|' || c == Bar || c == '{' || c == Inbrace || inblank(c))) {
+	    cmdsubst = in_brace_param;
+	    cmdpush(CS_CURSH);
+	} else if (in_pattern == 2 && c != '/')
+	    in_pattern = 1;
     }
   brk:
     if (errflag) {
 	if (in_brace_param) {
-	    while(bct-- >= in_brace_param)
+	    while(bct >= in_brace_param) {
+		if (bct-- == cmdsubst)
+		    cmdpop();
 		cmdpop();
+	    }
 	}
 	return LEXERR;
     }
@@ -1422,17 +1445,28 @@ gettokstr(int c, int sub)
     if (unmatched && !(lexflags & LEXFLAGS_ACTIVE))
 	zerr("unmatched %c", unmatched);
     if (in_brace_param) {
-	while(bct-- >= in_brace_param)
+	while(bct >= in_brace_param) {
+	    if (bct-- == cmdsubst)
+		cmdpop();
 	    cmdpop();
+	}
 	zerr("closing brace expected");
     } else if (unset(IGNOREBRACES) && !sub && lexbuf.len > 1 &&
 	       peek == STRING && lexbuf.ptr[-1] == '}' &&
 	       lexbuf.ptr[-2] != Bnull) {
 	/* hack to get {foo} command syntax work */
+	/*
+	 * Alias expansion when parsing command substitution means that
+	 * the case for raw lexical analysis may not be the same.
+	 * (Just go with it, OK?)
+	 */
+	int lar = lex_add_raw;
+	lex_add_raw = lexbuf_raw.len > 0 && lexbuf_raw.ptr[-1] == '}';
 	lexbuf.ptr--;
 	lexbuf.len--;
 	lexstop = 0;
 	hungetc('}');
+	lex_add_raw = lar;
     }
     *lexbuf.ptr = '\0';
     DPUTS(cmdsp != ocmdsp, "BUG: gettok: cmdstack changed.");
@@ -1451,8 +1485,8 @@ gettokstr(int c, int sub)
 static int
 dquote_parse(char endchar, int sub)
 {
-    int pct = 0, brct = 0, bct = 0, intick = 0, err = 0;
-    int c;
+    int pct = 0, brct = 0, bct = 0, intick = 0, err = 0, cmdsubst = 0;
+    int c, bskip = 0;
     int math = endchar == ')' || endchar == ']' || infor;
     int zlemath = math && zlemetacs > zlemetall + addedx - inbufct;
 
@@ -1521,11 +1555,25 @@ dquote_parse(char endchar, int sub)
 		c = Qstring;
 	    }
 	    break;
+	case '{':
+	    if (cmdsubst && !intick) {
+		/* In nofork substitution, tokenize as if unquoted */
+		c = Inbrace;
+		bskip++;
+	    }
+	    break;
 	case '}':
 	    if (intick || !bct)
 		break;
 	    c = Outbrace;
-	    bct--;
+	    if (bskip) {
+		bskip--;
+		break;
+	    }
+	    if (bct-- == cmdsubst) {
+		cmdsubst = 0;
+		cmdpop();
+	    }
 	    cmdpop();
 	    break;
 	case '`':
@@ -1580,14 +1628,34 @@ dquote_parse(char endchar, int sub)
 	if (err || lexstop)
 	    break;
 	add(c);
+	if (!cmdsubst && c == Inbrace) {
+	    /* Check for ${|...} nofork command substitution */
+	    if ((c = hgetc()) && !lexstop) {
+		if (c == '|' || inblank(c)) {
+		    cmdsubst = bct;
+		    cmdpush(CS_CURSH);
+		}
+		hungetc(c);
+	    }
+	}
     }
     if (intick == 2)
 	ALLOWHIST
     if (intick) {
 	cmdpop();
     }
-    while (bct--)
+    while (bct) {
+	if (bct-- == cmdsubst) {
+	    /*
+	     * You would think this is an error, but if we call it one,
+	     * parsestrnoerr() returns nonzero to subst_parse_str() and
+	     * subsequently "bad substitution" is not reported
+	     */
+	    /* err = 1 */
+	    cmdpop();
+	}
 	cmdpop();
+    }
     if (lexstop)
 	err = intick || endchar || err;
     else if (err == 1) {

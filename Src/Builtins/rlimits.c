@@ -145,6 +145,10 @@ static const resinfo_T known_resources[] = {
     {RLIMIT_UMTXP, "umtxp", ZLIMTYPE_NUMBER, 1,
 		'o', "umtx shared locks"},
 # endif
+# ifdef HAVE_RLIMIT_PIPEBUF /* FreeBSD */
+    {RLIMIT_PIPEBUF, "pipebuf", ZLIMTYPE_MEMORY, 1024,
+		'y', "size of buffers for pipes/fifos"},
+#endif
 
 # ifdef HAVE_RLIMIT_POSIXLOCKS	/* DragonFly */
     {RLIMIT_POSIXLOCKS, "posixlocks", ZLIMTYPE_NUMBER, 1,
@@ -154,8 +158,12 @@ static const resinfo_T known_resources[] = {
     {RLIMIT_NTHR, "maxpthreads", ZLIMTYPE_NUMBER, 1,
 		'r', "threads"},
 # endif
+# if defined(HAVE_RLIMIT_THREADS) && !defined(HAVE_RLIMIT_RTPRIO) && !defined(HAVE_RLIMIT_NTHR) /* AIX */
+    {RLIMIT_THREADS, "threads", ZLIMTYPE_NUMBER, 1,
+		'r', "threads (per process)"},
+# endif
     /* others */
-# if defined(HAVE_RLIMIT_PTHREAD) && !defined(HAVE_RLIMIT_NTHR)	/* IRIX ? */
+# if defined(HAVE_RLIMIT_PTHREAD) && !defined(HAVE_RLIMIT_NTHR) && !defined(HAVE_RLIMIT_THREADS) /* IRIX ? */
     {RLIMIT_PTHREAD, "maxpthreads", ZLIMTYPE_NUMBER, 1,
 		'T', "threads per process"},
 # endif
@@ -170,6 +178,10 @@ static const resinfo_T known_resources[] = {
 # ifdef HAVE_RLIMIT_TCACHE  /* HP-UX ? */
     {RLIMIT_TCACHE, "cachedthreads", ZLIMTYPE_NUMBER, 1,
 		'N', "cached threads"},
+# endif
+# ifdef HAVE_RLIMIT_NOVMON  /* Haiku */
+    {RLIMIT_NOVMON, "vnodemonitors", ZLIMTYPE_NUMBER, 1,
+		'N', "open vnode monitors"},
 # endif
 };
 

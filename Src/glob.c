@@ -133,7 +133,7 @@ typedef struct stat *Statptr;	 /* This makes the Ultrix compiler happy.  Go figu
 #define TT_TERABYTES 5
 
 
-typedef int (*TestMatchFunc) _((char *, struct stat *, off_t, char *));
+typedef int (*TestMatchFunc) (char *, struct stat *, off_t, char *);
 
 struct qual {
     struct qual *next;		/* Next qualifier, must match                */
@@ -1202,6 +1202,9 @@ checkglobqual(char *str, int sl, int nobareglob, char **sp)
     return ret;
 }
 
+/* notify zglob() that it is called from expandredir() */
+static int in_expandredir = 0;
+
 /* Main entry point to the globbing code for filename globbing. *
  * np points to a node in the list which will be expanded  *
  * into a series of nodes.                                      */
@@ -1264,7 +1267,7 @@ zglob(LinkList list, LinkNode np, int nountok)
 	int sense, qualsfound;
 	off_t data;
 	char *sdata, *newcolonmod, *ptr;
-	int (*func) _((char *, Statptr, off_t, char *));
+	int (*func) (char *, Statptr, off_t, char *);
 
 	/*
 	 * Initialise state variables for current file pattern.
@@ -1310,14 +1313,15 @@ zglob(LinkList list, LinkNode np, int nountok)
 	    if (*ptr == Dash)
 		*ptr = '-';
 	while (*s && !newcolonmod) {
-	    func = (int (*) _((char *, Statptr, off_t, char *)))0;
+	    func = (int (*) (char *, Statptr, off_t, char *)) 0;
 	    if (*s == ',') {
 		/* A comma separates alternative sets of qualifiers */
 		s++;
 		sense = 0;
 		if (qualct) {
 		    qn = (struct qual *)hcalloc(sizeof *qn);
-		    qo->or = qn;
+		    if (qo)
+			qo->or = qn;
 		    qo = qn;
 		    qualorct++;
 		    qualct = 0;
@@ -1481,7 +1485,7 @@ zglob(LinkList list, LinkNode np, int nountok)
 			    sav = *tt;
 			    *tt = '\0';
 
-			    if ((pw = getpwnam(s + arglen)))
+			    if ((pw = getpwnam(unmeta(s + arglen))))
 				data = pw->pw_uid;
 			    else {
 				zerr("unknown username '%s'", s + arglen);
@@ -1722,10 +1726,12 @@ zglob(LinkList list, LinkNode np, int nountok)
 		    char *os = --s;
 		    struct value v;
 
-		    v.isarr = SCANPM_WANTVALS;
+		    v.scanflags = SCANPM_WANTVALS;
 		    v.pm = NULL;
+		    v.start = 0;
 		    v.end = -1;
-		    v.flags = 0;
+		    v.valflags = 0;
+		    v.arr = NULL;
 		    if (getindex(&s, &v, 0) || s == os) {
 			zerr("invalid subscript");
 			restore_globstate(saved);
@@ -1879,6 +1885,14 @@ zglob(LinkList list, LinkNode np, int nountok)
 	    matchct = 1;
 	}
     }
+    else if (in_expandredir) {
+	/* if completing for redirection, we can't remove the pattern
+	 * even if NULL_GLOB is in effect */
+	zerr("redirection failed (no match): %s", ostr);
+	zfree(matchbuf, 0);
+	restore_globstate(saved);
+	return;
+    }
 
     if (!(gf_sortlist[0].tp & GS_NONE)) {
 	/*
@@ -1960,7 +1974,7 @@ zglob(LinkList list, LinkNode np, int nountok)
 	/* Sort arguments in to lexical (and possibly numeric) order. *
 	 * This is reversed to facilitate insertion into the list.    */
 	qsort((void *) & matchbuf[0], matchct, sizeof(struct gmatch),
-	      (int (*) _((const void *, const void *)))gmatchcmp);
+	      (int (*) (const void *, const void *)) gmatchcmp);
     }
 
     if (first < 0) {
@@ -2145,8 +2159,11 @@ xpandredir(struct redir *fn, LinkList redirtab)
     /* ...which undergoes all the usual shell expansions */
     prefork(&fake, isset(MULTIOS) ? 0 : PREFORK_SINGLE, NULL);
     /* Globbing is only done for multios. */
-    if (!errflag && isset(MULTIOS))
+    if (!errflag && isset(MULTIOS)) {
+	in_expandredir = 1;
 	globlist(&fake, 0);
+	in_expandredir = 0;
+    }
     if (errflag)
 	return 0;
     if (nonempty(&fake) && !nextnode(firstnode(&fake))) {
@@ -2418,11 +2435,11 @@ xpandbraces(LinkList list, LinkNode *np)
 	memset(ccl, 0, sizeof(ccl) / sizeof(ccl[0]));
 	for (p = str + 1; p < str2;) {
 	    if (itok(c1 = *p++))
-		c1 = ztokens[c1 - STOUC(Pound)];
+		c1 = ztokens[c1 - (unsigned char) Pound];
 	    if ((char) c1 == Meta)
 		c1 = 32 ^ *p++;
 	    if (itok(c2 = *p))
-		c2 = ztokens[c2 - STOUC(Pound)];
+		c2 = ztokens[c2 - (unsigned char) Pound];
 	    if ((char) c2 == Meta)
 		c2 = 32 ^ p[1];
 	    if (IS_DASH((char)c1) && lastch >= 0 &&

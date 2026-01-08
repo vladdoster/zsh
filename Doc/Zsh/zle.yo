@@ -25,14 +25,11 @@ vindex(BAUD, use of)
 vindex(COLUMNS, use of)
 vindex(LINES, use of)
 The parameters tt(BAUD), tt(COLUMNS), and tt(LINES) are also used by the
-line editor. See
-ifzman(em(Parameters Used By The Shell) in zmanref(zshparam))\
-ifnzman(noderef(Parameters Used By The Shell)).
+line editor. See sectref(Parameters Used by the Shell)(zshparam).
 
 vindex(zle_highlight, use of)
 The parameter tt(zle_highlight) is also used by the line editor; see
-ifzman(em(Character Highlighting) below)\
-ifnzman(noderef(Character Highlighting)).  Highlighting
+sectref(Character Highlighting)(below).  Highlighting
 of special characters and the region between the cursor and the
 mark (as set with tt(set-mark-command) in Emacs mode, or by tt(visual-mode)
 in Vi mode) is enabled
@@ -48,9 +45,7 @@ a number, or pressing escape before each digit, and in vi command mode
 by typing the number before entering a command.  Generally the numeric
 argument causes the next command entered to be repeated the specified
 number of times, unless otherwise noted below; this is implemented
-by the tt(digit-argument) widget. See also
-ifzman(the em(Arguments) subsection of the em(Widgets) section )\
-ifnzman(noderef(Arguments))\
+by the tt(digit-argument) widget. See also subref(Arguments)(below)
 for some other ways the numeric argument can be modified.
 
 startmenu()
@@ -59,6 +54,7 @@ menu(Zle Builtins)
 menu(Zle Widgets)
 menu(User-Defined Widgets)
 menu(Standard Widgets)
+menu(Terminal Extensions)
 menu(Character Highlighting)
 endmenu()
 
@@ -137,9 +133,7 @@ without a real command being read.
 
 A key sequence typed by the user can be turned into a command name for use
 in user-defined widgets with the tt(read-command) widget, described in
-ifzman(the subsection `Miscellaneous' of the section `Standard Widgets' below)\
-ifnzman(noderef(Miscellaneous) below)\
-.
+subref(Miscellaneous)(below).
 
 subsect(Local Keymaps)
 cindex(local keymaps)
@@ -376,7 +370,7 @@ If the tt(-p) flag is given, the following string will be taken as
 the prompt to display at the left.  If the tt(-r) flag is given,
 the following string gives the prompt to display at the right.  If the
 tt(-h) flag is specified, the history can be accessed from ZLE. If the
-tt(-e) flag is given, typing tt(^D) (Control-D) on an empty line
+tt(-e) flag is given, typing tt(^D) (Control-D) in an empty buffer
 causes tt(vared) to exit immediately with a non-zero return value.
 
 The tt(-M) option gives a keymap to link to the tt(main) keymap during
@@ -467,9 +461,7 @@ specified name, it is overwritten.  When the new
 widget is invoked from within the editor, the specified shell var(function)
 is called.  If no function name is specified, it defaults to
 the same name as the widget.  For further information, see
-ifzman(the section `Widgets' below)\
-ifnzman(noderef(Zle Widgets))\
-.
+sectref(Zle Widgets)(below).
 )
 item(tt(-f) var(flag) [ var(flag)... ])(
 Set various flags on the running widget.  Possible values for var(flag) are:
@@ -499,10 +491,7 @@ Create a user-defined completion widget named var(widget). The
 completion widget will behave like the built-in completion-widget
 whose name is given as var(completion-widget). To generate the
 completions, the shell function var(function) will be called.
-For further information, see
-ifzman(zmanref(zshcompwid))\
-ifnzman(noderef(Completion Widgets))\
-.
+For further information, see nmref(Completion Widgets)(zshcompwid).
 )
 item(tt(-R) [ tt(-c) ] [ var(display-string) ] [ var(string) ... ])(
 Redisplay the command line.  If a var(display-string) is
@@ -603,8 +592,7 @@ unpredictable behavior.
 
 Here is a simple example of using this feature.  A connection to a remote
 TCP port is created using the ztcp command; see 
-ifzman(the description of the tt(zsh/net/tcp) module in zmanref(zshmodules))\
-ifnzman(noderef(The zsh/net/tcp Module)).  Then a handler is installed
+sectref(The zsh/net/tcp Module)(zshmodules).  Then a handler is installed
 which simply prints out any data which arrives on this connection.  Note
 that `select' will indicate that the file descriptor needs handling
 if the remote side has closed the connection; we handle that by testing
@@ -741,12 +729,10 @@ in keymaps are bound to are in fact widgets.  Widgets can be user-defined
 or built in.
 
 The standard widgets built into ZLE are listed in
-ifzman(the section `Standard Widgets' below)\
-ifnzman(noderef(Standard Widgets)).
+sectref(Standard Widgets)(below).
 Other built-in widgets can be defined by other modules (see
-ifzman(zmanref(zshmodules))\
-ifnzman(noderef(Zsh Modules))\
-).  Each built-in widget has two names: its normal canonical name, and the
+nmref(Zsh Modules)(zshmodules)).
+Each built-in widget has two names: its normal canonical name, and the
 same name preceded by a `tt(.)'.  The `tt(.)' name is special: it can't be
 rebound to a different widget.  This makes the widget available even when
 its usual name has been redefined.
@@ -972,8 +958,7 @@ Indicates if the region is currently active.  It can be assigned 0 or 1
 to deactivate and activate the region respectively. A value of 2
 activates the region in line-wise mode with the highlighted text
 extending for whole lines only; see
-ifzman(em(Character Highlighting) below)\
-ifnzman(noderef(Character Highlighting)).
+sectref(Character Highlighting)(below).
 )
 vindex(region_highlight)
 item(tt(region_highlight) (array))(
@@ -995,8 +980,7 @@ itemiz(A start offset in the same units as tt(CURSOR).)
 itemiz(An end offset in the same units as tt(CURSOR).)
 itemiz(A highlight specification in the same format as
 used for contexts in the parameter tt(zle_highlight), see
-ifnzman(noderef(Character Highlighting))\
-ifzman(the section `Character Highlighting' below);
+sectref(Character Highlighting)(below);
 for example, tt(standout) or tt(fg=red,bold).)
 itemiz(Optionally, a string of the form `tt(memo=)var(token)'.
 The var(token) consists of everything between the `tt(=)' and the next
@@ -1006,15 +990,14 @@ The var(token) is preserved verbatim but not parsed in any way.
 Plugins may use this to identify array elements they have added: for example,
 a plugin might set var(token) to its (the plugin's) name and then use
 `tt(region_highlight=+LPAR() ${region_highlight:#*memo=)var(token)tt(} +RPAR())'
-in order to remove array elements it have added.
+in order to remove array elements it added.
 
 (This example uses the `tt(${)var(name)tt(:#)var(pattern)tt(})' array-grepping
 syntax described in
-ifzman(the section `Parameter Expansion' in zmanref(zshexpn))\
-ifnzman(noderef(Parameter Expansion)).))
+sectref(Parameter Expansion)(zshexpn).))
 enditemize()
 
-For example, 
+For example,
 
 example(region_highlight=("P0 20 bold memo=foobar"))
 
@@ -1026,16 +1009,19 @@ as soon as the line is accepted.
 
 Note that zsh 5.8 and older do not support the `tt(memo=)var(token)' field
 and may misparse the third (highlight specification) field when a memo
-is given.
-COMMENT(The syntax `tt(0 20 bold, memo=foobar)' (with an auxiliary comma)
-happens to work on both zsh <=5.8 and zsh 5.9-to-be, but that seems to be more of
+is given. COMMENT(The syntax `tt(0 20 bold, memo=foobar)' (with an auxiliary comma)
+happens to work on both zsh <=5.8 and zsh 5.9, but that seems to be more of
 an accident of implementation than something we should make a first-class-citizen
 API promise.  It's mentioned in the "Incompatibilities" section of README.)
 
+Where a particular region is covered by multiple entries in
+tt(region_highlight), their effects are merged. In the case of conflicts, later
+entries take precedence over earlier ones. This precedence ordering can be
+overridden by specifying layers.
+
 The final highlighting on the command line depends on both tt(region_highlight)
 and tt(zle_highlight); see
-ifzman(the section CHARACTER HIGHLIGHTING below)\
-ifnzman(noderef(Character Highlighting)) for details.
+sectref(Character Highlighting)(below) for details.
 )
 vindex(registers)
 item(tt(registers) (associative array))(
@@ -1144,6 +1130,7 @@ example(if [[ $ZLE_STATE == *globalhistory*insert* ]]; then ...; fi)
 )
 enditem()
 
+anchor(Special Widgets)
 subsect(Special Widgets)
 
 There are a few user-defined widgets which are special to the shell.
@@ -1214,7 +1201,7 @@ This can be used for detecting switches between the vi command
 )
 enditem()
 
-texinode(Standard Widgets)(Character Highlighting)(User-Defined Widgets)(Zsh Line Editor)
+texinode(Standard Widgets)(Terminal Extensions)(User-Defined Widgets)(Zsh Line Editor)
 sect(Standard Widgets)
 cindex(widgets, standard)
 The following is a list of all the standard widgets,
@@ -1229,8 +1216,8 @@ shown in the list are those based on the VT100, common on many modern
 terminals, but in fact these are not necessarily bound.  In the case of the
 tt(viins) keymap, the initial escape character of the sequences serves also
 to return to the tt(vicmd) keymap: whether this happens is determined by
-the tt(KEYTIMEOUT) parameter, see ifzman(zmanref(zshparam))\
-ifnzman(noderef(Parameters)).
+the tt(KEYTIMEOUT) parameter, see
+sectref(Parameters Used by the Shell)(zshparam).
 startmenu()
 menu(Movement)
 menu(History Control)
@@ -1341,7 +1328,7 @@ Read a character from the keyboard, and move to
 the position just after the previous occurrence of it in the line.
 )
 tindex(vi-first-non-blank)
-item(tt(vi-first-non-blank) (unbound) (tt(^)) (unbound))(
+item(tt(vi-first-non-blank) (unbound) (tt(_ ^)) (unbound))(
 Move to the first non-blank character in the line.
 )
 tindex(vi-forward-word)
@@ -1570,9 +1557,8 @@ item(tt(history-incremental-pattern-search-forward))(
 These widgets behave similarly to the corresponding widgets with
 no tt(-pattern), but the search string typed by the user is treated
 as a pattern, respecting the current settings of the various options
-affecting pattern matching.  See
-ifzman(FILENAME GENERATION in zmanref(zshexpn))\
-ifnzman(noderef(Filename Generation)) for a description of patterns.
+affecting pattern matching.  See sectref(Filename Generation)(zshexpn)
+for a description of patterns.
 If no numeric argument was given lowercase letters in the search
 string may match uppercase letters in the history.  The string may begin
 with `tt(^)' to anchor the search to the beginning of the line.
@@ -2470,10 +2456,11 @@ command.  tt(run-help) is normally aliased to tt(man).
 tindex(vi-set-buffer)
 item(tt(vi-set-buffer) (unbound) (tt(")) (unbound))(
 Specify a buffer to be used in the following command.
-There are 37 buffers that can be specified:
+There are 39 buffers that can be specified:
 the 26 `named' buffers tt("a) to tt("z), the `yank' buffer tt("0),
-the nine `queued' buffers tt("1) to tt("9) and the `black hole' buffer
-tt("_).  The named buffers can also be specified as tt("A) to tt("Z).
+the nine `queued' buffers tt("1) to tt("9), the `black hole' buffer
+tt("_) and the system selection tt("*) and clipboard tt("+).
+The named buffers can also be specified as tt("A) to tt("Z).
 
 When a buffer is specified for a cut, change or yank command, the text
 concerned replaces the previous contents of the specified buffer. If
@@ -2481,6 +2468,9 @@ a named buffer is specified using a capital, the newly cut text is
 appended to the buffer instead of overwriting it. When using the tt("_)
 buffer, nothing happens. This can be useful for deleting text without
 affecting any buffers.
+
+Accessing and updating the system clipboard relies on specific support from
+the terminal.
 
 If no buffer is specified for a cut or change command, tt("1) is used, and
 the contents of tt("1) to tt("8) are each shifted along one buffer;
@@ -2573,7 +2563,7 @@ tt(command) keymap, and if not found there in the main keymap.
 tindex(which-command)
 item(tt(which-command) (tt(ESC-?)) (unbound) (unbound))(
 Push the buffer onto the buffer stack, and execute the
-command `tt(which-command) var(cmd)'. where var(cmd) is the current
+command `tt(which-command) var(cmd)', where var(cmd) is the current
 command.  tt(which-command) is normally aliased to tt(whence).
 )
 tindex(vi-digit-or-beginning-of-line)
@@ -2627,7 +2617,102 @@ argument, multiple words will be selected.
 )
 enditem()
 
-texinode(Character Highlighting)()(Standard Widgets)(Zsh Line Editor)
+texinode(Terminal Extensions)(Character Highlighting)(Standard Widgets)(Zsh Line Editor)
+sect(Terminal Extensions)
+
+vindex(.term.extensions, setting)
+Modern terminals often carry functionality that is not covered by the
+`terminfo' library.  For these cases, the availability of a feature can be
+asserted by including it in the array parameter tt(.term.extensions).
+Similarly the absence of a feature can be indicated via it's inclusion with a
+`tt(-)' prefix.  Where a feature isn't listed, the status of terminal support
+is unknown and defaults apply as to whether ZLE will use the feature.  This
+is often harmless as terminals ignore extra instructions they don't recognise.
+Even if your terminal does support a particular extension, you may choose to
+list it with an initial `tt(-)' as a way to disable the associated feature.
+Many extensions are named with common prefixes to group related extensions.
+This allows a whole class of extensions to be disabled with a single entry such
+as by adding `tt(-cursor)' to disable cursor shape and color changing.
+
+When ZLE starts, it will add entries for features that were auto-detected.  This
+auto-detection uses extensions itself, all named with a `tt(query)' prefix.  As
+this happens when ZLE starts disabling them needs to be done early in the
+startup files.  A value of `tt(-query)' will disable all terminal queries on
+startup, including those that query terminal properties such as colors rather
+than detecting features.  Populating the array with the status of auto-detected
+features will mean that associated terminal queries are not needed and will be
+skipped.
+
+Extensions can be any of the following, where the marks `<D>' and `<E>'
+indicate whether each one is disabled or enabled by default:
+
+startitem()
+item(tt(bracketed-paste) <E>)(
+Many terminal emulators have a feature that allows applications to identify
+when text is pasted into the terminal rather than being typed normally.  For
+ZLE, this means that special characters such as tabs and newlines can be
+inserted instead of invoking editor commands. Furthermore, pasted text forms a
+single undo event and if the region is active, pasted text will replace the
+region.
+)
+item(tt(cursor-color) <E>)(
+Support for changing the color of the cursor.
+)
+item(tt(cursor-shape) <E>)(
+Support for changing the shape of the cursor.
+)
+item(tt(integration-output) <E>)(
+This provides the terminal with semantic information regarding where the output
+from commands start and finish. Some terminals use this information to make it
+easy to select just the output from a single command.
+)
+item(tt(integration-prompt) <E>)(
+This informs the terminal when the shell displays a prompt. This enables a
+variety of terminal features such as displaying markers, allowing you to jump
+to previous commands in the scroll-back buffer and ensuring that right prompts
+are handled correctly when the window is resized. The end of the prompt also
+provides the terminal with a marker for the start of user input.
+)
+item(tt(integration-pwd) <E>)(
+This advises the terminal of the shell's current directory which allows it
+to create new windows with the same current working directory.
+)
+item(tt(query-bg) <E>)(
+Query the terminal background color which is used for tt(.term.bg) and
+tt(.term.mode).
+)
+item(tt(query-cursorcolor) <E>)(
+Query the cursor color. This facilitates restoring the cursor to its original
+color if it has been configured via tt(zle_cursorform). The color is also
+assigned to tt(.term.cursor).
+)
+item(tt(query-fg) <E>)(
+Query the terminal foreground color which is used for tt(.term.fg).
+)
+item(tt(query-id) <E>)(
+Query the terminal identification which is used for tt(.term.id) and
+tt(.term.version).
+)
+xitem(tt(modkeys-kitty) <D>)
+item(tt(query-modkeys-kitty) <D>)(
+Support for the kitty keyboard handling protocol which enables reporting of a
+wider range of key combinations and resolves problems with ambiguous key
+sequences.  Currently there is only support for detecting whether the terminal
+supports this feature.
+)
+item(tt(modkeys-xterm) <D>)(
+Support for the keyboard handling sequences associated with xterm's
+tt(modifyOtherKeys) X resource. This enables reporting of a wider range of key
+combinations and resolves some problems with ambiguous key sequences.
+)
+xitem(tt(truecolor) <D>)
+item(tt(query-truecolor) <E>)(
+Support for 24-bit truecolor escape sequences.  Auto-detection also tries
+termcap and the tt(COLORTERM) environment variable.
+)
+enditem()
+
+texinode(Character Highlighting)()(Terminal Extensions)(Zsh Line Editor)
 sect(Character Highlighting)
 
 vindex(zle_highlight, setting)
@@ -2686,6 +2771,9 @@ for different completions.
 item(tt(paste))(
 Following a command to paste text, the characters that were inserted.
 )
+item(tt(ellipsis))(
+Markers used to indicate where the text doesn't fit within the terminal.
+)
 enditem()
 
 When tt(region_highlight) is set, the contexts that describe a region DASH()-
@@ -2734,9 +2822,16 @@ not all types of highlighting are available on all terminals:
 
 startitem()
 item(tt(none))(
-No highlighting is applied to the given context.  It is not useful for
-this to appear with other types of highlighting; it is used to override
-a default.
+No additional highlighting is applied to the given context.  It is not
+useful for this to appear with other types of highlighting; it is used to
+override a default.  Any inherited highlighting is retained so for example,
+with tt(region:none), highlighting associated with tt(default) is still used
+for the region.
+)
+item(tt(reset))(
+The terminal's default highlighting is applied to the given context.
+This can be useful as a way to clear all inherited highlighting, so
+may be used before naming other types of highlighting.
 )
 item(tt(fg=)var(colour))(
 The foreground colour should be set to var(colour), a decimal integer,
@@ -2763,9 +2858,7 @@ million colours). In this case, the hex triplet format can be used. This
 consists of a `tt(#)' followed by either a three or six digit hexadecimal
 number describing the red, green and blue components of the colour. Hex
 triplets can also be used with 88 and 256 colour terminals via the
-tt(zsh/nearcolor) module (see ifzman(zmanref(zshmodules))\
-ifnzman(noderef(The zsh/nearcolor Module))\
-).
+tt(zsh/nearcolor) module (see nmref(The zsh/nearcolor Module)(zshmodules)).
 
 Colour is also known as color.
 )
@@ -2775,8 +2868,12 @@ This works similarly to the foreground colour, except the background is
 not usually affected by the bold attribute.
 )
 item(tt(bold))(
-The characters in the given context are shown in a bold font.
+The characters in the given context are shown with a bold font weight.
 Not all terminals distinguish bold fonts.
+)
+item(tt(faint))(
+The characters in the given context are shown with a faint font weight.
+Not all terminals distinguish faint fonts.
 )
 item(tt(standout))(
 The characters in the given context are shown in the terminal's standout
@@ -2791,7 +2888,37 @@ The characters in the given context are shown underlined.  Some
 terminals show the foreground in a different colour instead; in this
 case whitespace will not be highlighted.
 )
+item(tt(italic))(
+The characters in the given context are shown in a italic font.
+Not all terminals support italic fonts.
+)
+item(tt(hl=)var(group))(
+Use the specified highlighting group.  The var(group) is used as a key into
+the associative array tt(.zle.hlgroups) to determine the actual highlighting.
+)
+item(tt(layer=)var(layer))(
+The layer is used to determine precedence when multiple highlighting regions
+overlap. The var(layer) is a decimal integer, with higher numbers taking
+precedence over lower numbers. This cannot be used with the tt(default) and
+tt(ellipsis) fields of tt(zle_highlight) because they treated as base layers.
+With the other fields 30 applies by default for tt(special), 20 for tt(region)
+and tt(isearch) and 15 for tt(paste). Highlighting defined in
+tt(region_highlight) defaults to layer 10 and would take precedence over
+highlighting for any fields of tt(zle_highlight) that are assigned to the same
+layer.
+)
+item(tt(opacity=)var(fg)tt(%)[tt(/)var(bg)tt(%)])(
+Instead of replacing colors in higher layers, the colors can be mixed. The
+opacity is specified as a percentage where tt(0%) is fully transparent and
+tt(100%) represents the default behavior of replacing the underlying colour.
+If a single value is specified, it applies to both foreground and background.
+)
 enditem()
+
+In addition, the simple highlighting types can be prefixed with tt("no") to
+explicitly disable them. This is useful where highlighting is merged with
+inherited highlighting from other definitions. Note that tt(nobold) selects a
+normal font weight so also has the effect of disabling tt(faint).
 
 The characters described above as `special' are as follows.  The
 formatting described here is used irrespective of whether the characters
@@ -2850,3 +2977,66 @@ special array parameter tt(region_highlight); see
 ifnzman(noderef(Zle Widgets))\
 ifzman(above).
 
+texinode(Cursor Shape and Color)()()(Character Highlighting)
+subsect(Cursor Shape and Color)
+cindex(cursor shape)
+cindex(cursor color)
+
+vindex(zle_cursorform, setting)
+Some terminals support the ability to change the shape and color of the cursor.
+On such terminals, the line editor will use cursor styles appropriate to
+different contexts. This is controlled via the array parameter
+tt(zle_cursorform). To disable all cursor changes, see the tt(.term.extensions)
+parameter.
+
+Each element of the array should consist of a word indicating a context
+followed by a colon, then a comma-separated list of properties describing the
+shape and color to apply to the cursor.
+
+The available contexts follow with the default value shown in
+parentheses. Where no default is given, the terminal's default is applied:
+
+startitem()
+item(tt(command))(
+Used for vi normal mode.
+)
+item(tt(edit))(
+The default form used in the line editor and for editing text in emacs
+mode.
+)
+item(tt(insert) (tt(bar)))(
+Used for vi editing mode.
+)
+item(tt(overwrite))(
+Used when editing text in overwrite mode or with the vi replace command.
+)
+item(tt(pending) (tt(underline)))(
+Used where the line editor is waiting for a single key press such as the vi
+operator pending mode widget.
+)
+item(tt(region))(
+Applied for both tt(regionstart) and tt(regionend) contexts.
+)
+item(tt(regionstart))(
+Used when the region is active and the cursor is positioned at the start of the
+region. The region includes the text under the cursor when it is positioned at
+the start so it is best to configure the cursor so that it does not obscure
+this fact.
+)
+item(tt(regionend))(
+Used when the region is active and the cursor is positioned at the end of the
+region. Note that when this is the case, the region does not include the cursor
+position.
+)
+item(tt(visual))(
+Used when vi visual mode is active. The visual selection always includes the
+cursor position so the same advice as for tt(regionstart) applies.
+)
+enditem()
+
+The available cursor shapes are tt(none), tt(bar), tt(block), tt(underline) and
+tt(hidden). Additionally, you can specify either tt(blink) or tt(steady) to
+indicate whether the cursor should flash and specify a color as an RGB triplet
+in hexadecimal format with tt(color=)var(#xxxxxx). The value tt(none)
+applies the terminal's defaults. Note that on many terminals, this may
+differ from the initial cursor state from when the shell started.

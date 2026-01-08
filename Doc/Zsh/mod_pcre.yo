@@ -20,12 +20,12 @@ including those that indicate newline.
 )
 findex(pcre_study)
 item(tt(pcre_study))(
-Studies the previously-compiled PCRE which may result in faster
-matching.
+Requests JIT compilation for the previously-compiled PCRE which
+may result in faster matching.
 )
 findex(pcre_match)
 item(tt(pcre_match) [ tt(-v) var(var) ] [ tt(-a) var(arr) ] \
-[ tt(-n) var(offset) ] [ tt(-b) ] var(string))(
+[ tt(-A) var(assoc) ] [ tt(-n) var(offset) ] [ tt(-bd) ] var(string))(
 Returns successfully if tt(string) matches the previously-compiled
 PCRE.
 
@@ -36,7 +36,9 @@ substrings, unless the tt(-a) option is given, in which
 case it will set the array var(arr).  Similarly, the variable
 tt(MATCH) will be set to the entire matched portion of the
 string, unless the tt(-v) option is given, in which case the variable
-var(var) will be set.
+var(var) will be set. Furthermore, any named captures will
+be stored in the associative array tt(.pcre.match) unless an
+alternative is given with tt(-A).
 No variables are altered if there is no successful match.
 A tt(-n) option starts searching for a match from the
 byte var(offset) position in var(string).  If the tt(-b) option is given,
@@ -66,6 +68,15 @@ done
 print -l $accum)
 )
 enditem()
+
+If the regular expression contains callouts, these are executed as shell code.
+During the execution of the callout, the string the regular expression is
+matching against is available in the parameter tt(.pcre.subject). If there is a
+non-zero return status from the shell code, the callout does not match.
+
+The option tt(-d) uses the alternative breadth-first DFA search algorithm of
+pcre. This sets tt(match), or the array given with tt(-a), to all the matches
+found from the same start point in the subject.
 
 The tt(zsh/pcre) module makes available the following test condition:
 

@@ -554,7 +554,8 @@ yank(UNUSED(char **args))
 }
 
 /* position: 0 is before, 1 after, 2 split the line */
-static void pastebuf(Cutbuffer buf, int mult, int position)
+static void
+pastebuf(Cutbuffer buf, int mult, int position)
 {
     int cc;
     if (buf->flags & CUTBUFFER_LINE) {
@@ -613,7 +614,20 @@ viputbefore(UNUSED(char **args))
 	return 1;
     if (zmod.flags & MOD_NULL)
 	return 0;
-    if (zmod.flags & MOD_VIBUF)
+    if (zmod.flags & MOD_OSSEL) {
+	struct cutbuffer kbuf;
+	int x;
+	char *pbuf = system_clipget(zmod.flags & MOD_CLIP ? 'c' : 'p');
+	if (!pbuf || !*pbuf)
+	    return 1;
+	kbuf.buf = stringaszleline(pbuf, 0, &x, NULL, NULL);
+	kbuf.len = x;
+	kbuf.flags = 0;
+	kct = -1;
+	yankcs = zlecs;
+	pastebuf(&kbuf, n, 0);
+	return 0;
+    } else if (zmod.flags & MOD_VIBUF)
 	kctbuf = &vibuf[zmod.vibuf];
     else
 	kctbuf = &cutbuf;
@@ -636,7 +650,20 @@ viputafter(UNUSED(char **args))
 	return 1;
     if (zmod.flags & MOD_NULL)
 	return 0;
-    if (zmod.flags & MOD_VIBUF)
+    if (zmod.flags & MOD_OSSEL) {
+	struct cutbuffer kbuf;
+	int x;
+	char *pbuf = system_clipget(zmod.flags & MOD_CLIP ? 'c' : 'p');
+	if (!pbuf || !*pbuf)
+	    return 1;
+	kbuf.buf = stringaszleline(pbuf, 0, &x, NULL, NULL);
+	kbuf.len = x;
+	kbuf.flags = 0;
+	kct = -1;
+	yankcs = zlecs;
+	pastebuf(&kbuf, n, 1);
+	return 0;
+    } else if (zmod.flags & MOD_VIBUF)
 	kctbuf = &vibuf[zmod.vibuf];
     else
 	kctbuf = &cutbuf;
@@ -661,15 +688,25 @@ putreplaceselection(UNUSED(char **args))
     startvichange(-1);
     if (n < 0 || zmod.flags & MOD_NULL)
 	return 1;
-    putbuf = (zmod.flags & MOD_VIBUF) ? &vibuf[zmod.vibuf] : &cutbuf;
-    if (!putbuf->buf)
-	return 1;
-    memcpy(&prevbuf, putbuf, sizeof(prevbuf));
+    if (zmod.flags & MOD_OSSEL) {
+        int x;
+        char *pbuf = system_clipget(zmod.flags & MOD_CLIP ? 'c' : 'p');
+        if (!pbuf || !*pbuf)
+            return 1;
+        prevbuf.buf = stringaszleline(pbuf, 0, &x, NULL, NULL);
+        prevbuf.len = x;
+        prevbuf.flags = 0;
+    } else {
+	putbuf = (zmod.flags & MOD_VIBUF) ? &vibuf[zmod.vibuf] : &cutbuf;
+	if (!putbuf->buf)
+	    return 1;
+	memcpy(&prevbuf, putbuf, sizeof(prevbuf));
 
-    /* if "9 was specified, prevent killregion from freeing it */
-    if (zmod.vibuf == 35) {
-	putbuf->buf = 0;
-	clear = 1;
+	/* if "9 was specified, prevent killregion from freeing it */
+	if (zmod.vibuf == 35) {
+	    putbuf->buf = 0;
+	    clear = 1;
+	}
     }
 
     zmod.flags = 0; /* flags apply to paste not kill */
@@ -841,9 +878,8 @@ whatcursorposition(UNUSED(char **args))
 	    strcpy(s, mbstr);
 	    s += len;
 	}
-	sprintf(s, " (0%o, %u, 0x%x)", (unsigned int)c,
+	s += sprintf(s, " (0%o, %u, 0x%x)", (unsigned int)c,
 		(unsigned int)c, (unsigned int)c);
-	s += strlen(s);
     }
     sprintf(s, "  point %d of %d(%d%%)  column %d", zlecs+1, zlell+1,
 	    zlell ? 100 * zlecs / zlell : 0, zlecs - bol);
@@ -1540,7 +1576,7 @@ addsuffix(int tp, int flags, ZLE_STRING_T chars, int lenstr, int lensuf)
 /* Same as addsuffix, but from metafied string */
 
 /**/
-mod_export void
+static void
 addsuffixstring(int tp, int flags, char *chars, int lensuf)
 {
     int slen, alloclen;
