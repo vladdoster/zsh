@@ -104,6 +104,45 @@ _zatraps() {
   unset _zaTRAPS
 }
 
+# Progress meter function, similar to zftp_progress
+# Shows the progress of processing arguments through zargs
+_zaprogress() {
+  local style update=1
+  
+  # Get style settings from zstyle
+  zstyle -s ":zargs" progress style
+  zstyle -s ":zargs" update update
+  
+  # Don't show progress unless stderr is a terminal or style is none
+  [[ ! -t 2 || $style = (|none) ]] && return 0
+  
+  # Don't show progress in interactive or verbose mode
+  (( $opts[(I)-(-interactive|p)] || $opts[(I)-(-verbose|t)] )) && return 0
+  
+  # Check if we should update (based on time interval)
+  (( ${+_za_last_update} )) && (( SECONDS - _za_last_update < update )) && return 0
+  
+  # Calculate progress
+  local -i total=$_za_total_args processed=$_za_processed_args
+  
+  if (( total > 0 )); then
+    local frac="$(( processed * 100 / total ))%"
+    
+    if [[ $style = bar && ${+COLUMNS} = 1 && $COLUMNS -gt 0 ]]; then
+      # Display as a progress bar
+      integer maxwidth=$(( COLUMNS - 7 ))
+      local width="$(( processed * maxwidth / total ))"
+      print -nP "\r%S${(l:width:):-}%s${(l:maxwidth-width:):-}: ${frac}%%" 1>&2
+    else
+      # Display as percentage
+      print -n "\rzargs: $processed/$total ($frac)" 1>&2
+    fi
+    
+    # Update timestamp
+    typeset -g _za_last_update=$SECONDS
+  fi
+}
+
 emulate -L zsh || return 1
 local -a opts eof n s l P i
 
@@ -292,6 +331,10 @@ then
     done; _zajobs=()'
 fi
 
+# Initialize progress tracking variables
+typeset -gi _za_total_args=$ARGC
+typeset -gi _za_processed_args=0
+
 # Everything has to be in a subshell so that we don't "wait" for any
 # unrelated jobs of the parent shell.
 (
@@ -309,6 +352,11 @@ do
 	(( end > n && ( end = n ) ))
 	args=( "${(@)argv[1,end]}" )
 	shift $((end > ARGC ? ARGC : end))
+	
+	# Update progress counter
+	(( _za_processed_args += $#args ))
+	_zaprogress
+	
 	if (( $#i ))
 	then call=( "${(@)command/$i/$args}" )
 	else call=( "${(@)command}" "${(@)args}" )
@@ -328,12 +376,22 @@ do
     eval "$wait
 	$analyze"
 done
+
+# Final progress update and clear the line
+if [[ -t 2 ]]; then
+  local style
+  zstyle -s ":zargs" progress style
+  if [[ $style != (|none) ]]; then
+    print 1>&2  # Print newline to finish progress display
+  fi
+fi
+
 return $ret
 
 )
 
 } always {
-  builtin unfunction _zarun _zatraps
+  builtin unfunction _zarun _zatraps _zaprogress
 }
 
 # }

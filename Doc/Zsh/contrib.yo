@@ -4581,6 +4581,45 @@ each var(input) is processed separately as if by `tt(-L) tt(1)'.
 For details of the other tt(zargs) options, see the manref(xargs)(1) man page (but note
 the difference in function between tt(zargs) and tt(xargs)) or run
 tt(zargs) with the tt(-)tt(-help) option.
+
+subsect(Progress Display)
+
+tt(zargs) can display a progress meter showing the number of arguments
+processed.  This feature is similar to the progress display in tt(zftp_progress).
+The progress display is controlled via the tt(zstyle) mechanism with the
+context tt(:zargs).  The following styles are recognized:
+
+startitem()
+item(tt(progress))(
+Controls the type of progress display:
+
+startitem()
+item(empty or `tt(none)')(
+No progress meter.
+)
+item(`tt(bar)')(
+Use a growing bar of inverse video.  Requires the terminal width to be
+available in tt(COLUMNS).
+)
+item(`tt(percent)' or any other non-blank value)(
+Show the count and percentage of arguments processed.
+)
+enditem()
+
+Progress is only displayed when stderr is connected to a terminal, and is
+automatically disabled in interactive (tt(-p)) or verbose (tt(-t)) modes.
+)
+item(tt(update))(
+Minimum time in seconds between updates of the progress display.  Defaults
+to 1 second.  Use a smaller value for more frequent updates.
+)
+enditem()
+
+Example usage:
+
+example(zstyle ':zargs' progress bar
+zstyle ':zargs' update 0.5
+zargs *.txt -- process-file)
 )
 findex(zed)
 xitem(tt(zed) [ tt(-f) [ tt(-x) var(num) ] ] var(name))
