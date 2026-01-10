@@ -126,16 +126,27 @@ _zaprogress() {
   local -i total=$_za_total_args processed=$_za_processed_args
   
   if (( total > 0 )); then
-    local frac="$(( processed * 100 / total ))%"
+    local -i percent=$(( processed * 100 / total ))
+    
+    # Determine color based on progress (green for complete, cyan for in-progress, yellow for starting)
+    local color
+    if (( percent == 100 )); then
+      color='%F{green}'
+    elif (( percent >= 50 )); then
+      color='%F{cyan}'
+    else
+      color='%F{yellow}'
+    fi
     
     if [[ $style = bar && ${+COLUMNS} = 1 && $COLUMNS -gt 0 ]]; then
-      # Display as a progress bar
+      # Display as a colorized progress bar
       integer maxwidth=$(( COLUMNS - 7 ))
       local width="$(( processed * maxwidth / total ))"
-      print -nP "\r%S${(l:width:):-}%s${(l:maxwidth-width:):-}: ${frac}%%" 1>&2
+      # Use color for the filled portion, white for percentage
+      print -nP "\r${color}%S${(l:width:):-}%s%f${(l:maxwidth-width:):-}: %F{white}%B${percent}%%%f" 1>&2
     else
-      # Display as percentage
-      print -n "\rzargs: $processed/$total ($frac)" 1>&2
+      # Display as colored percentage
+      print -nP "\r${color}zargs:%f %B$processed%f/$total ${color}(${percent}%%)%f" 1>&2
     fi
     
     # Update timestamp

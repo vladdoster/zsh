@@ -4598,11 +4598,13 @@ item(empty or `tt(none)')(
 No progress meter.
 )
 item(`tt(bar)')(
-Use a growing bar of inverse video.  Requires the terminal width to be
-available in tt(COLUMNS).
+Use a growing bar of inverse video with color.  Requires the terminal width to be
+available in tt(COLUMNS).  The bar color changes based on progress: yellow (0-49%),
+cyan (50-99%), and green (100%).
 )
 item(`tt(percent)' or any other non-blank value)(
-Show the count and percentage of arguments processed.
+Show the count and percentage of arguments processed with color highlighting.
+The color changes based on progress: yellow (0-49%), cyan (50-99%), and green (100%).
 )
 enditem()
 
