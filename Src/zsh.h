@@ -1883,7 +1883,7 @@ struct tieddata {
 #define PM_HASHED	(1<<4)	/* association                              */
 
 #define PM_TYPE(X) \
-  (X & (PM_SCALAR|PM_INTEGER|PM_EFLOAT|PM_FFLOAT|PM_ARRAY|PM_HASHED))
+  (X & (PM_SCALAR|PM_INTEGER|PM_EFLOAT|PM_FFLOAT|PM_ARRAY|PM_HASHED|PM_NAMEREF))
 
 #define PM_LEFT		(1<<5)	/* left justify, remove leading blanks      */
 #define PM_RIGHT_B	(1<<6)	/* right justify, fill with leading blanks  */
@@ -1939,8 +1939,6 @@ struct tieddata {
 #define PM_HASHELEM     (1<<28) /* is a hash-element */
 #define PM_NAMEDDIR     (1<<29) /* has a corresponding nameddirtab entry    */
 #define PM_NAMEREF      (1<<30) /* pointer to a different parameter         */
-
-#define PM_NEWREF	PM_SINGLE	/* Overload in for-loop namerefs    */
 
 /* The option string corresponds to the first of the variables above */
 #define TYPESET_OPTSTR "aiEFALRZlurtxUhHT"

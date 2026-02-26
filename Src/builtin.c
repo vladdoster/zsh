@@ -2035,7 +2035,7 @@ typeset_single(char *cname, char *pname, Param pm, int func,
 
     if (pm && (pm->node.flags & PM_NAMEREF) && !((off|on) & PM_NAMEREF) &&
 	(pm->level == locallevel || !(on & PM_LOCAL))) {
-	if ((pm = (Param)resolve_nameref(pm, NULL)))
+	if ((pm = resolve_nameref(pm)))
 	    pname = pm->node.nam;
 	if (pm && (pm->node.flags & PM_NAMEREF) &&
 	    (on & ~(PM_NAMEREF|PM_LOCAL|PM_READONLY))) {
@@ -2628,6 +2628,7 @@ typeset_single(char *cname, char *pname, Param pm, int func,
 	 */
 	switch (PM_TYPE(pm->node.flags)) {
 	case PM_SCALAR:
+	case PM_NAMEREF:
 	    pm->gsu.s->setfn(pm, ztrdup(""));
 	    break;
 	case PM_INTEGER:
@@ -2713,7 +2714,7 @@ bin_typeset(char *name, char **argv, LinkList assigns, Options ops, int func)
 	else
 	    continue;
 	if (OPT_MINUS(ops,'n')) {
-	    if ((on|off) & ~(PM_READONLY|PM_UPPER|PM_HIDEVAL)) {
+	    if (bit & ~(PM_READONLY|PM_UPPER|PM_HIDEVAL)) {
 		zwarnnam(name, "-%c not allowed with -n", optval);
 		/* return 1; */
 	    }
@@ -3915,7 +3916,7 @@ bin_unset(char *name, char **argv, Options ops, int func)
 	    returnval = 1;
 	} else if (ss) {
 	    if ((pm->node.flags & PM_NAMEREF) &&
-		(!(pm = (Param)resolve_nameref(pm, NULL)) || pm->width)) {
+		(!(pm = resolve_nameref(pm)) || pm->width)) {
 		/* warning? */
 		continue;
 	    }
@@ -3960,7 +3961,7 @@ bin_unset(char *name, char **argv, Options ops, int func)
 	} else {
 	    if (!OPT_ISSET(ops,'n')) {
 		int ref = (pm->node.flags & PM_NAMEREF);
-		if (!(pm = (Param)resolve_nameref(pm, NULL)))
+		if (!(pm = resolve_nameref(pm)))
 		    continue;
 		if (ref && pm->level < locallevel &&
 		    !(pm->node.flags & PM_READONLY)) {

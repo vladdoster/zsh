@@ -1,3 +1,27 @@
+2026-02-21  Bart Schaefer  <schaefer@zsh.org>
+
+	* dana: 54203: Test/A08time.ztst: replace "read -t" with "zselect"
+
+2026-02-16  Bart Schaefer  <schaefer@zsh.org>
+
+	* Philippe: 53776: Src/builtin.c, Src/exec.c, Src/module.c,
+	Src/params.c,  Src/subst.c,  Src/zsh.h, Src/Modules/param_private.c,
+	Src/Modules/parameter.c, Src/Zle/complete.c,  Src/Zle/computil.c,
+	Src/Zle/zle_params.c: Treat PM_NAMEREF as first-class PM_TYPE,
+	enabling rejection of array initializers for namerefs
+
+	* Philippe: 54122: Src/builtin.c, Test/K01nameref.ztst: avoid
+	warnings for valid nameref options
+
+	* Philippe: 54063: Src/Modules/param_private.c, Src/builtin.c,
+	Src/params.c, Src/zsh.h, Test/K01nameref.ztst: Simplifications
+	for resolve_nameref() and setscope()
+
+2026-02-04  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
+
+	* unposted: Doc/Zsh/compsys.yo: fix a format error introduced
+	by worker/53821
+
 2025-12-21  Jun-ichi Takimoto  <takimoto-j@kba.biglobe.ne.jp>
 
 	* 53959+54149: Src/glob.c, Test/D02glob.ztst: when redirecting
