@@ -190,7 +190,7 @@ taddassign(wordcode code, Estate state, int typeset)
 	if (typeset) {
 	    /* dummy assignment --- just var name */
 	    (void)ecgetstr(state, EC_NODUP, NULL);
-	    taddchr(' ');
+	    // taddchr(' ');
 	    return;
 	}
 	taddchr('+');
@@ -199,10 +199,10 @@ taddassign(wordcode code, Estate state, int typeset)
     if (WC_ASSIGN_TYPE(code) == WC_ASSIGN_ARRAY) {
 	taddchr('(');
 	taddlist(state, WC_ASSIGN_NUM(code));
-	taddstr(") ");
+	taddstr(")");
     } else {
 	taddstr(ecgetstr(state, EC_NODUP, NULL));
-	taddchr(' ');
+	// taddchr(' ');
     }
 }
 
@@ -242,9 +242,9 @@ taddnl(int no_semicolon)
 	    }
 	}
     } else if (no_semicolon) {
-	taddstr(" ");
+	taddstr("");
     } else {
-	taddstr("; ");
+	taddstr(";");
     }
 }
 
@@ -448,7 +448,7 @@ gettext2(Estate state)
 		    if (tnewlins)
 			taddnl(0);
 		    else
-			taddstr((WC_LIST_TYPE(code) & Z_ASYNC) ? " " : "; ");
+			taddstr((WC_LIST_TYPE(code) & Z_ASYNC) ? "" : "; ");
 		    s->code = *state->pc++;
 		    s->pop = (WC_LIST_TYPE(s->code) & Z_END);
 		}

@@ -75,6 +75,7 @@ static struct builtin builtins[] =
     BUILTIN("fg", 0, bin_fg, 0, -1, BIN_FG, NULL, NULL),
     BUILTIN("float", BINF_PLUSOPTS | BINF_MAGICEQUALS | BINF_PSPECIAL | BINF_ASSIGN, (HandlerFunc)bin_typeset, 0, -1, 0, "E:%F:%HL:%R:%Z:%ghlp:%rtux", "E"),
     BUILTIN("functions", BINF_PLUSOPTS, bin_functions, 0, -1, 0, "ckmMstTuUWx:z", NULL),
+    BUILTIN("format", BINF_PLUSOPTS, bin_functions, 0, -1, 0, "ckmMstTuUhWx:z", NULL),
     BUILTIN("getln", 0, bin_read, 0, -1, 0, "ecnAlE", "zr"),
     BUILTIN("getopts", 0, bin_getopts, 2, -1, 0, NULL, NULL),
     BUILTIN("hash", BINF_MAGICEQUALS, bin_hash, 0, -1, 0, "Ldfmrv", NULL),
@@ -3364,6 +3365,14 @@ bin_functions(char *name, char **argv, Options ops, int func)
     int on = 0, off = 0, pflags = 0, roff, expand = 0;
 
     /* Do we have any flags defined? */
+    if (OPT_ISSET(ops,'h')) {
+	          printf("%s", name);
+            printf("Usage: %s [OPTIONS] {FUNCTION...}\n\n", name);
+            printf("Input:\n");
+            printf("  [INPUT]...         One or more functions separated by blank space\n");
+            return 0;
+    }
+
     if (OPT_PLUS(ops,'u'))
 	off |= PM_UNDEFINED;
     else if (OPT_MINUS(ops,'u') || OPT_ISSET(ops,'X'))
@@ -3472,6 +3481,7 @@ bin_functions(char *name, char **argv, Options ops, int func)
 	char *eptr;
 	expand = (int)zstrtol(OPT_ARG(ops,'x'), &eptr, 10);
 	if (*eptr) {
+	    zwarnnam(name, "format number expected after -x");
 	    zwarnnam(name, "number expected after -x");
 	    return 1;
 	}
