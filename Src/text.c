@@ -649,8 +649,14 @@ gettext2(Estate state)
 			taddstr(" in ");
 			taddlist(state, *state->pc++);
 		    }
-		    taddnl(0);
-		    taddstr("do");
+		    // taddnl(0);
+		    // taddstr("do");
+		    // dec_tindent();
+		    // taddnl(0);
+			// Keep the `do' on the same line as the condition if possible, to make it more clear that they are connected.
+		    taddstr("; do");
+		    // tindent++;
+		    // taddnl(0);
 		}
 		tindent++;
 		taddnl(0);
@@ -689,10 +695,11 @@ gettext2(Estate state)
 		tindent++;
 		tpush(code, 0);
 	    } else if (!s->pop) {
-		dec_tindent();
-		taddnl(0);
-		taddstr("do");
-		tindent++;
+		// dec_tindent();
+		// taddnl(0);
+		// Keep the `do' on the same line as the condition if possible, to make it more clear that they are connected.
+		taddstr("; do");
+		// tindent++;
 		taddnl(0);
 		s->pop = 1;
 	    } else {
@@ -738,7 +745,7 @@ gettext2(Estate state)
 		    Wordcode prev_pc;
 		    tindent++;
 		    if (tnewlins)
-			taddnl(0);
+			taddnl(1);
 		    else
 			taddchr(' ');
 		    taddstr("(");
@@ -751,8 +758,9 @@ gettext2(Estate state)
 			if (ialts)
 			    taddstr(" | ");
 		    }
-		    taddstr(") ");
+		    taddstr(")");
 		    tindent++;
+		    taddnl(1);
 		    n = tpush(code, 0);
 		    n->u._case.end = end;
 		    n->pop = (prev_pc + WC_CASE_SKIP(code) >= end);
@@ -763,7 +771,11 @@ gettext2(Estate state)
 		dec_tindent();
 		switch (WC_CASE_TYPE(code)) {
 		case WC_CASE_OR:
-		    taddstr(" ;;");
+			// Add a ;; before the next case if there isn't already one, to make it more clear that the next case is separate.
+		    tindent++;
+		    taddnl(1);
+		    taddstr(";;");
+		    dec_tindent();
 		    break;
 
 		case WC_CASE_AND:
@@ -788,8 +800,9 @@ gettext2(Estate state)
 		    if (ialts)
 			taddstr(" | ");
 		}
-		taddstr(") ");
+		taddstr(")");
 		tindent++;
+		taddnl(1);
 		s->code = code;
 		s->pop = (prev_pc + WC_CASE_SKIP(code) >=
 			  s->u._case.end);
@@ -797,7 +810,13 @@ gettext2(Estate state)
 		dec_tindent();
 		switch (WC_CASE_TYPE(code)) {
 		case WC_CASE_OR:
-		    taddstr(" ;;");
+		    // taddnl(1);
+		    // taddstr(";;");
+			// Add a semicolon before the next case if there isn't already one, to make it more clear that the next case is separate.
+		    tindent++;
+		    taddnl(1);
+		    taddstr(";;");
+		    dec_tindent();
 		    break;
 
 		case WC_CASE_AND:
@@ -832,8 +851,9 @@ gettext2(Estate state)
 		stack = 1;
 	    } else if (s->u._if.cond) {
 		dec_tindent();
-		taddnl(0);
-		taddstr("then");
+		// taddnl(0);
+		// Keep the `then' on the same line as the condition if possible, to make it more clear that they are connected.
+		taddstr("; then");
 		tindent++;
 		taddnl(0);
 		s->u._if.cond = 0;
@@ -858,9 +878,8 @@ gettext2(Estate state)
 		stack = 1;
 	    }
 	    break;
-	case WC_COND:
-	    {
-		int ctype;
+	case WC_COND: {
+	    int ctype;
 
 		if (!s) {
 		    taddstr("[[ ");
